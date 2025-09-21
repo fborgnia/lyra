@@ -1,0 +1,5 @@
+transformers
+torch
+torch_geometric
+accelerate
+# Add other dependencies as needed

@@ -1,0 +1,17 @@
+# Hugging Face cache
+.hf-cache/
+__pycache__/
+
+# Build artifacts
+dist/
+build/
+*.egg-info/
+
+# Local environment
+.venv/
+venv/
+env/
+
+# IDE specific
+.vscode/
+.idea/
