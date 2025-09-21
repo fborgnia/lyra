@@ -64,4 +64,4 @@ def test_generate_triggers_memory_update_placeholder(model, capsys):
 
     #captured = capsys.readouterr()
     # Check that the placeholder message for the memory update is printed
-    assert "Extracted hidden states for the turn with shape" in captured.out
+    assert "Updating memory" in captured.out

@@ -42,6 +42,7 @@ class GemmaWithMemory(nn.Module):
         return self.gemma(input_ids=input_ids, attention_mask=attention_mask, **kwargs)
 
     def generate(self, input_ids, **kwargs):
+        print(f"Generating Answer")
         # Custom generate method to wrap the standard generate function
         
         # Request hidden states and a dictionary output for easier access
@@ -68,32 +69,34 @@ class GemmaWithMemory(nn.Module):
         Internal method to update the memory graph with the latest turn.
         This implementation extracts the hidden states of the generated tokens.
         """
+        print(f"Updating memory")
         # The `hidden_states` from `generate` is a tuple of tuples.
         # Outer tuple: one element for each generated token.
         # Inner tuple: one element for each layer's hidden state.
-        # We want the hidden state from the last layer for each generated token.
         
-        # `generated_outputs.hidden_states` contains states for generated tokens only.
-        # Each element of the outer tuple corresponds to a single generation step.
-        # Each of these elements is a tuple of all layer states for that step.
-        # We take the last layer's state [-1] for each step.
+        # At each generation step, the hidden state tensor has shape [batch, seq_len, hidden_dim].
+        # The seq_len is > 1 for the first step and 1 for all subsequent steps.
+        # We must select only the state for the last token in the sequence at each step.
         last_layer_hidden_states = [
-            step_hidden_states[-1] for step_hidden_states in generated_outputs.hidden_states
+            step_hidden_states[-1][:, -1:, :] for step_hidden_states in generated_outputs.hidden_states
         ]
         
-        # Stack the states for all generated tokens into a single tensor.
-        # Shape: [num_generated_tokens, batch_size, hidden_dim]
-        turn_hidden_states = torch.stack(last_layer_hidden_states)
+        # Now, every tensor in the list has shape [batch, 1, hidden_dim].
+        # We can concatenate them along the sequence dimension (dim=1).
+        turn_hidden_states = torch.cat(last_layer_hidden_states, dim=1)
         
-        # For now, we'll just print the shape to verify.
-        # The batch dimension is in the middle, so we'll permute it to be more intuitive.
-        # New shape: [batch_size, num_generated_tokens, hidden_dim]
-        turn_hidden_states = turn_hidden_states.permute(1, 0, 2)
+        # The resulting shape is already [batch_size, num_generated_tokens, hidden_dim].
         
         print(f"Extracted hidden states for the turn with shape: {turn_hidden_states.shape}")
 
-        # TODO:
         # 1. Pool the hidden states to create a single summary vector.
+        # We use mean pooling across the sequence of generated tokens.
+        turn_summary_vector = torch.mean(turn_hidden_states, dim=1)
+
+        print(f"Created turn summary vector with shape: {turn_summary_vector.shape}")
+
+        # TODO:
         # 2. Initialize the memory_graph if it's None.
         # 3. Add the new summary vector as a node to self.memory_graph.
-        pass# Phase 2: GemmaWithMemory main class
+        pass
+        

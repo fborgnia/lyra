@@ -7,14 +7,16 @@ from lyra.model import GemmaWithMemory
 
 model = GemmaWithMemory()
 
-prompt = "<start_of_turn>user\nWhat is the capital of France?<end_of_turn>\n<start_of_turn>model\nIt's Paris.<end_of_turn>\n<start_of_turn>user\nIs it pretty?<end_of_turn>\n<start_of_turn>model"
+#prompt = "<start_of_turn>user\nWhat is the capital of France?<end_of_turn>\n<start_of_turn>model\nIt's Paris.<end_of_turn>\n<start_of_turn>user\nIs it pretty?<end_of_turn>\n<start_of_turn>model"
+prompt = "<start_of_turn>user\nWhat is the capital of France?<end_of_turn>\n<start_of_turn>model\n"
+
 inputs = model.tokenizer(prompt, return_tensors="pt")
-input_ids = inputs["input_ids"]
 
 # Generate a short response. The model should produce an <end_of_turn> token.
 outputs = model.generate(
-    input_ids=input_ids,
-    max_new_tokens=15,
+    input_ids=inputs["input_ids"],
+    attention_mask=inputs["attention_mask"],
+    max_new_tokens=150,
     eos_token_id=model.end_of_turn_token_id
 )
 
@@ -22,4 +24,3 @@ outputs = model.generate(
 full_text = model.tokenizer.decode(outputs[0], skip_special_tokens=False)
 print(f"\n--- Model Output ---\n{full_text}\n--------------------")
 
-sleep(5)  # Give some time for async prints to appear
