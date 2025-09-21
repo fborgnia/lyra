@@ -1,4 +1,12 @@
-### **\#\# Phase 1: Foundation & Component Scaffolding (Time: \~1 Week)**
+### **\#\# Phase 1: Foundation & -   The `forward` method signature must be compatible with the base Gemma model to work with `generate()`. It will *not* accept an external `memory_graph` argument, instead always relying on its internal state.
+    -   **During training and inference**, the model will use its internal `self.memory_graph`.
+
+    **Conceptual Code:**
+    ```python
+    # Inside the GemmaWithMemory forward method
+    def forward(self, input_ids, attention_mask=None, ...): # No more memory_graph argument
+        # Always use the internal graph
+        active_memory_graph = self.memory_graphScaffolding (Time: \~1 Week)**
 
 **Goal:** Set up the project environment and create the individual, standalone modules. The focus here is on getting each component working in isolation before trying to connect them.
 
@@ -71,12 +79,14 @@
 
 1.  **Custom Data Loader:**
     *   Implement a PyTorch `Dataset` class that reads the synthetic data file.
-    *   Write a **custom `collate_fn`** for your `DataLoader`. This function is critical. It will take a batch of dialogues and construct the `torch_geometric.data.Data` objects for each.
-    *   The final batch yielded by the loader should contain the tokenized questions, labels, and their corresponding, ready-to-use GNN memory graphs.
+    *   The `collate_fn` for the `DataLoader` should be simple. It will batch the raw context sentences, questions, and answers. It no longer needs to construct the GNN graph.
 2.  **The Training Script (train.py):**
     *   Initialize your `GemmaWithMemory` model.
     *   Initialize an optimizer (e.g., AdamW). **Crucially, pass only the trainable parameters to it**: `optimizer = AdamW(list(model.gnn.parameters()) + list(model.injection_layer.parameters()))`.
-    *   Write the training loop. It will iterate through your custom data loader. In each step, it will pass the tokenized question and the pre-built `memory_graph` from the batch to the model's `forward` method.
+    *   Write the training loop. For each item in the batch, it will:
+        1.  Call `model.clear_memory()`.
+        2.  Loop through the context sentences, calling `model.add_to_memory()` for each one.
+        3.  Pass the tokenized question to the model's `forward` method.
     *   Compute `CrossEntropyLoss` and perform backpropagation.
 3.  **Verification Run:**
     *   Run the training script on a small fraction of your data to confirm that the loss is steadily decreasing. This proves that gradients are flowing correctly.

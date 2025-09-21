@@ -1,4 +1,4 @@
-### **Summary: Gemma with Integral Episodic GNN Memory Layer**
+### **Summary: Gemma -   **Training:** The training loop is responsible for populating the model's memory. For each sample, it first calls `model.clear_memory()`, then iteratively calls `model.add_to_memory()` with the context sentences before passing the question to the `forward` method. Gradients flow only through the GNN and injection layer.ith Integral Episodic GNN Memory Layer**
 
 **Note on MVP Scope:** This document describes the overall architectural vision. The initial Minimum Viable Product (MVP) implements a simplified version of this concept. For the MVP, a **Memory Injection Layer** is inserted *between* two of Gemma's standard Transformer blocks. This approach was chosen over modifying an attention head to reduce complexity while still validating the core hypothesis of GNN-based memory integration.
 
