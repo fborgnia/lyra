@@ -1,6 +1,8 @@
+import sys
 import torch
 import torch.nn as nn
 from transformers import Gemma3ForCausalLM, AutoTokenizer
+from torch_geometric.data import Data
 
 # These will be implemented later, but we create placeholders for now.
 # from .gnn import EpisodicMemoryGNN
@@ -95,8 +97,31 @@ class GemmaWithMemory(nn.Module):
 
         print(f"Created turn summary vector with shape: {turn_summary_vector.shape}")
 
-        # TODO:
         # 2. Initialize the memory_graph if it's None.
-        # 3. Add the new summary vector as a node to self.memory_graph.
+        if self.memory_graph is None:
+            # This is the first node in the graph.
+            self.memory_graph = Data(x=turn_summary_vector)
+            # Edges will be added from the second node onwards.
+            self.memory_graph.edge_index = torch.empty((2, 0), dtype=torch.long)
+            print("Initialized memory graph with the first node.")
+        else:
+            # 3. Add the new summary vector as a node to self.memory_graph.
+            # Add the new node's features.
+            existing_nodes = self.memory_graph.x
+            new_nodes = torch.cat([existing_nodes, turn_summary_vector], dim=0)
+            
+            # Add an edge from the previous node to the new node.
+            prev_node_idx = existing_nodes.shape[0] - 1
+            new_node_idx = prev_node_idx + 1
+            new_edge = torch.tensor([[prev_node_idx], [new_node_idx]], dtype=torch.long)
+            new_edge_index = torch.cat([self.memory_graph.edge_index, new_edge], dim=1)
+            
+            # Update the graph object.
+            self.memory_graph.x = new_nodes
+            self.memory_graph.edge_index = new_edge_index
+            print(f"Added new node. Graph now has {self.memory_graph.num_nodes} nodes.")
+
+        # TODO:
+        # The next step will be to use this graph.
         pass
-        
+
