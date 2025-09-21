@@ -43,16 +43,25 @@ def test_generate_triggers_memory_update_placeholder(model, capsys):
     Tests if the generate() method correctly triggers the placeholder
     for the memory update logic after generating a response.
     """
-    prompt = "<start_of_turn>user\nWhat is the capital of France?<end_of_turn>\n<start_of_turn>model\n"
+    prompt = "<start_of_turn>user\nWhat is the capital of France?<end_of_turn>\n<start_of_turn>model\nIt's Paris.<end_of_turn>\n<start_of_turn>user\nIs it pretty?<end_of_turn>\n<start_of_turn>model"
     inputs = model.tokenizer(prompt, return_tensors="pt")
-
+    
     # Generate a short response. The model should produce an <end_of_turn> token.
-    model.generate(
-        **inputs,
+    outputs = model.generate(
+        input_ids=inputs["input_ids"],
+        attention_mask=inputs["attention_mask"],
         max_new_tokens=15,
         eos_token_id=model.end_of_turn_token_id
     )
 
+     # Decode the full output to text for visual inspection
+    full_text = model.tokenizer.decode(outputs[0], skip_special_tokens=False)
     captured = capsys.readouterr()
+    
+    with capsys.disabled():
+        print(f"\n--- Model Output ---\n{full_text}\n--------------------")
+        print(f"--- Captured STDOUT ---\n{captured.out.strip()}\n---------------------")
+
+    #captured = capsys.readouterr()
     # Check that the placeholder message for the memory update is printed
-    assert "Turn complete. Triggering memory update (TODO)." in captured.out
+    assert "Extracted hidden states for the turn with shape" in captured.out
