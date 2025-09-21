@@ -1,18 +1,18 @@
 import torch
 import torch.nn as nn
-from transformers import GemmaForCausalLM, GemmaTokenizer
+from transformers import Gemma3ForCausalLM, AutoTokenizer
 
 # These will be implemented later, but we create placeholders for now.
 # from .gnn import EpisodicMemoryGNN
 # from .injection import MemoryInjectionLayer
 
 class GemmaWithMemory(nn.Module):
-    def __init__(self, model_name='google/gemma-2b-it'):
+    def __init__(self, model_path='./models/gemma-3-1b-it'):
         super().__init__()
         
         # 1. Load a frozen Gemma instruction-tuned model and tokenizer
-        self.gemma = GemmaForCausalLM.from_pretrained(model_name)
-        self.tokenizer = GemmaTokenizer.from_pretrained(model_name)
+        self.gemma = Gemma3ForCausalLM.from_pretrained(model_path)
+        self.tokenizer = AutoTokenizer.from_pretrained(model_path)
         
         # Freeze the base model parameters
         for param in self.gemma.parameters():
