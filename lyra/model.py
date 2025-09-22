@@ -58,7 +58,11 @@ class GemmaWithMemory(nn.Module):
             # For now, we just use the original forward pass.
         
         # The actual forward pass for token generation happens inside `generate`
-        return self.gemma(input_ids=input_ids, attention_mask=attention_mask, **kwargs)
+        # We need to pass the modified hidden states as `inputs_embeds`
+        if 'modified_hidden_states' in locals():
+            return self.gemma(inputs_embeds=modified_hidden_states, attention_mask=attention_mask, **kwargs)
+        else:
+            return self.gemma(input_ids=input_ids, attention_mask=attention_mask, **kwargs)
 
     def generate(self, input_ids, **kwargs):
         print(f"Generating Answer")
