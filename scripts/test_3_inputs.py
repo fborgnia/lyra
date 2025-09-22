@@ -26,7 +26,7 @@ print(f"\n--- Model Output (Turn 1) ---\n{full_text1}\n--------------------\n")
 
 # --- Turn 2: Force retrieval from memory to generate an answer ---
 print("--- Turn 2: Retrieving memory to answer question ---")
-prompt2_text = "<start_of_turn>user\nWhat is my name?<end_of_turn>\n<start_of_turn>model\n"
+prompt2_text = "<start_of_turn>user\nMy name is John?<end_of_turn>\n<start_of_turn>model\n"
 inputs2 = model.tokenizer(prompt2_text, return_tensors="pt")
 
 # NOTE: We are ONLY passing the second prompt's inputs.
@@ -44,7 +44,7 @@ print(f"\n--- Model Output (Turn 2) ---\n{full_text2}\n--------------------")
 
 # --- Turn 3: Force another retrieval from memory to generate an answer ---
 print("--- Turn 2: Retrieving memory to answer question ---")
-prompt2_text = "<start_of_turn>user\nWhat is my name?<end_of_turn>\n<start_of_turn>model\n"
+prompt2_text = "<start_of_turn>user\nMy name is Lucas?<end_of_turn>\n<start_of_turn>model\n"
 inputs2 = model.tokenizer(prompt2_text, return_tensors="pt")
 
 # NOTE: We are ONLY passing the second prompt's inputs.

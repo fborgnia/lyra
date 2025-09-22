@@ -23,10 +23,16 @@ outputs1 = model.generate(
 full_text1 = model.tokenizer.decode(outputs1[0], skip_special_tokens=False)
 print(f"\n--- Model Output (Turn 1) ---\n{full_text1}\n--------------------\n")
 
+# --- Check memory graph ---
+if model.memory_graph:
+    print(f"Memory graph has {model.memory_graph.num_nodes} nodes after turn 1.")
+else:
+    print("Memory graph is empty after turn 1.")
+
 
 # --- Turn 2: Force retrieval from memory to generate an answer ---
 print("--- Turn 2: Retrieving memory to answer question ---")
-prompt2_text = "<start_of_turn>user\nWhat my name?<end_of_turn>\n<start_of_turn>model\n"
+prompt2_text = "<start_of_turn>user\nMy name is Juan.<end_of_turn>\n<start_of_turn>model\n"
 inputs2 = model.tokenizer(prompt2_text, return_tensors="pt")
 
 # NOTE: We are ONLY passing the second prompt's inputs.
@@ -40,3 +46,9 @@ outputs2 = model.generate(
 )
 full_text2 = model.tokenizer.decode(outputs2[0], skip_special_tokens=False)
 print(f"\n--- Model Output (Turn 2) ---\n{full_text2}\n--------------------")
+
+# --- Check memory graph again ---
+if model.memory_graph:
+    print(f"Memory graph has {model.memory_graph.num_nodes} nodes after turn 2.")
+else:
+    print("Memory graph is empty after turn 2.")
