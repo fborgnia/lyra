@@ -9,20 +9,36 @@ class MemoryInjectionLayer(nn.Module):
         # For now, this layer just adds the retrieved context.
         # Later, it could have its own parameters.
 
-    def forward(self, hidden_states, memory_graph, query_vector):
+    def forward(self, hidden_states, attention_mask, memory_graph, query_vector):
         """
-        Retrieves memory and injects it into the hidden states.
+        Retrieves memory and injects it into the prompt embeddings by prepending it.
         """
         # 1. Use the GNN to retrieve the relevant memory context
+        # retrieved_memory shape: [batch, hidden_dim]
         retrieved_memory = self.gnn(query_vector, memory_graph)
         
-        print("Injecting retrieved memory into the model.", file=sys.stderr)
+        print("Injecting retrieved memory into the model.", file=sys.stdout)
         
-        # 2. Inject the memory by adding it to the prompt's hidden states.
-        # We add the single context vector to every token's hidden state.
-        # hidden_states: [batch, seq_len, hidden_dim]
-        # retrieved_memory.unsqueeze(1): [batch, 1, hidden_dim]
-        # Broadcasting handles the addition across the sequence length.
-        modified_hidden_states = hidden_states + retrieved_memory.unsqueeze(1)
+        # 2. Prepare memory for prepending. It needs a sequence length of 1.
+        # The retrieved memory is a hidden state, but we need to treat it as an embedding.
+        # Shape becomes: [batch, 1, hidden_dim]
+        memory_to_prepend = retrieved_memory.unsqueeze(1)
+
+        # 3. Prepend the memory to the original prompt embeddings.
+        # hidden_states (here, embeddings) shape: [batch, seq_len, hidden_dim]
+        # modified_embeds shape: [batch, 1 + seq_len, hidden_dim]
+        modified_embeds = torch.cat([memory_to_prepend, hidden_states], dim=1)
+
+        # 4. Create a new attention mask for the prepended memory.
+        # It's a tensor of ones with shape [batch, 1].
+        memory_attention_mask = torch.ones(
+            (attention_mask.shape[0], 1), 
+            dtype=attention_mask.dtype, 
+            device=attention_mask.device
+        )
+
+        # 5. Prepend the memory's attention mask to the original attention mask.
+        # final_attention_mask shape: [batch, 1 + seq_len]
+        final_attention_mask = torch.cat([memory_attention_mask, attention_mask], dim=1)
         
-        return modified_hidden_states
+        return modified_embeds, final_attention_mask

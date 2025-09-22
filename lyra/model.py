@@ -34,89 +34,81 @@ class GemmaWithMemory(nn.Module):
 
     def forward(self, input_ids, attention_mask=None, **kwargs):
         # "Instruct-Aware" forward method
-        # Check if <start_of_turn> is in the input and reset memory if it's a new conversation
-        # This simple check assumes the first token of a new convo is <start_of_turn>
-        if input_ids[0][1] == self.start_of_turn_token_id and self.memory_graph is not None:
-            print("New conversation detected. Resetting memory.", file=sys.stderr)
-            self.memory_graph = None
+        print("Running forward pass...", file=sys.stdout)
         
-        # Get hidden states for the input prompt
-        prompt_outputs = self.gemma(input_ids=input_ids, attention_mask=attention_mask, output_hidden_states=True)
-        prompt_hidden_states = prompt_outputs.hidden_states[-1] # Last layer hidden states
+        # Get the initial token embeddings for the input prompt.
+        # These are the embeddings that the model expects as `inputs_embeds`.
+        prompt_embeds = self.gemma.get_input_embeddings()(input_ids)
 
-        # If memory exists, query it and inject the context
         if self.memory_graph is not None and self.memory_graph.num_nodes > 0:
-            print("Querying memory graph...", file=sys.stderr)
-            # 1. Create a query vector from the prompt's hidden states
+            print("Querying memory graph...", file=sys.stdout)
+            # 1. Create a query vector. For this, we need a richer representation,
+            # so we run a separate forward pass to get the last hidden state.
+            with torch.no_grad():
+                prompt_outputs = self.gemma(input_ids=input_ids, attention_mask=attention_mask, output_hidden_states=True)
+                prompt_hidden_states = prompt_outputs.hidden_states[-1]
             query_vector = torch.mean(prompt_hidden_states, dim=1)
             
-            # 2. Pass memory and query to the injection layer (which will use the GNN)
-            # This is a placeholder for the real injection mechanism
-            modified_hidden_states = self.injection_layer(prompt_hidden_states, self.memory_graph, query_vector)
-            
-            # In a real implementation, we would pass these modified states to the rest of the model.
-            # For now, we just use the original forward pass.
+            # 2. Pass the initial embeddings (not last hidden state) to the injection layer.
+            modified_embeds, attention_mask = self.injection_layer(
+                prompt_embeds, attention_mask, self.memory_graph, query_vector
+            )
         
-        # The actual forward pass for token generation happens inside `generate`
-        # We need to pass the modified hidden states as `inputs_embeds`
-        if 'modified_hidden_states' in locals():
-            return self.gemma(inputs_embeds=modified_hidden_states, attention_mask=attention_mask, **kwargs)
+        # Return the appropriate embeddings and attention mask.
+        if 'modified_embeds' in locals():
+            return modified_embeds, attention_mask
         else:
-            return self.gemma(input_ids=input_ids, attention_mask=attention_mask, **kwargs)
+            return prompt_embeds, attention_mask
 
     def generate(self, input_ids, **kwargs):
-        print(f"Generating Answer")
+        print(f"Generating Answer", file=sys.stderr)
         # Custom generate method to wrap the standard generate function
-        
-        # Request hidden states and a dictionary output for easier access
-        kwargs['output_hidden_states'] = True
-        kwargs['return_dict_in_generate'] = True
 
-        # Store the length of the input prompt
-        input_length = input_ids.shape[1]
-
-        # Generate the response
-        outputs = self.gemma.generate(input_ids=input_ids, **kwargs)
+        # 1. Call the forward pass to get potentially memory-infused embeddings.
+        # The forward pass handles the memory retrieval and injection logic.
+        final_prompt_embeds, final_attention_mask = self.forward(input_ids, **kwargs)
         
-        # Check if the generation ended with the <end_of_turn> token.
-        if outputs.sequences[0][-1] == self.end_of_turn_token_id:
-             print("Turn complete. Triggering memory update.")
-             # Pass the full output and the input length to the update method.
-             self._update_memory(outputs, input_length)
+        # BUGFIX: The 'attention_mask' in kwargs is for the original input_ids.
+        # We must use the 'final_attention_mask' returned by the forward pass,
+        # as it may have been modified (e.g., by prepending memory).
+        # We also remove it from kwargs to avoid passing it twice to `gemma.generate`.
+        if 'attention_mask' in kwargs:
+            del kwargs['attention_mask']
+
+        # 2. Generate the response using the (potentially modified) embeddings.
+        print(f"Shape of inputs_embeds: {final_prompt_embeds.shape}", file=sys.stderr)
+        print(f"Shape of attention_mask: {final_attention_mask.shape}", file=sys.stderr)
+        outputs = self.gemma.generate(
+            inputs_embeds=final_prompt_embeds, 
+            attention_mask=final_attention_mask, 
+            **kwargs
+        )
+        
+        # 3. Check if the generation ended with the <end_of_turn> token.
+        # The output is a tensor of token IDs, shape [batch_size, sequence_length].
+        if outputs[0][-1] == self.end_of_turn_token_id:
+             print("Turn complete. Triggering memory update.", file=sys.stderr)
+             # To create the memory, we need the prompt's hidden states.
+             # We run a forward pass on the original input_ids to get them.
+             with torch.no_grad():
+                prompt_outputs = self.gemma(input_ids=input_ids, output_hidden_states=True)
+                prompt_hidden_states = prompt_outputs.hidden_states[-1]
+             self._update_memory(prompt_hidden_states)
 
         # Return only the generated sequences to maintain standard behavior
-        return outputs.sequences
+        return outputs
 
-    def _update_memory(self, generated_outputs, input_length):
+    def _update_memory(self, prompt_hidden_states):
         """
-        Internal method to update the memory graph with the latest turn.
-        This implementation extracts the hidden states of the generated tokens.
+        Internal method to update the memory graph using the prompt's hidden states.
         """
-        print(f"Updating memory")
-        # The `hidden_states` from `generate` is a tuple of tuples.
-        # Outer tuple: one element for each generated token.
-        # Inner tuple: one element for each layer's hidden state.
+        print(f"Updating memory using the prompt's context.", file=sys.stderr)
         
-        # At each generation step, the hidden state tensor has shape [batch, seq_len, hidden_dim].
-        # The seq_len is > 1 for the first step and 1 for all subsequent steps.
-        # We must select only the state for the last token in the sequence at each step.
-        last_layer_hidden_states = [
-            step_hidden_states[-1][:, -1:, :] for step_hidden_states in generated_outputs.hidden_states
-        ]
-        
-        # Now, every tensor in the list has shape [batch, 1, hidden_dim].
-        # We can concatenate them along the sequence dimension (dim=1).
-        turn_hidden_states = torch.cat(last_layer_hidden_states, dim=1)
-        
-        # The resulting shape is already [batch_size, num_generated_tokens, hidden_dim].
-        
-        print(f"Extracted hidden states for the turn with shape: {turn_hidden_states.shape}")
+        # 1. Pool the prompt's hidden states to create a single summary vector.
+        # We use mean pooling across the sequence of prompt tokens.
+        turn_summary_vector = torch.mean(prompt_hidden_states, dim=1)
 
-        # 1. Pool the hidden states to create a single summary vector.
-        # We use mean pooling across the sequence of generated tokens.
-        turn_summary_vector = torch.mean(turn_hidden_states, dim=1)
-
-        print(f"Created turn summary vector with shape: {turn_summary_vector.shape}")
+        print(f"Created turn summary vector with shape: {turn_summary_vector.shape}", file=sys.stderr)
 
         # 2. Initialize the memory_graph if it's None.
         if self.memory_graph is None:
@@ -124,7 +116,7 @@ class GemmaWithMemory(nn.Module):
             self.memory_graph = Data(x=turn_summary_vector)
             # Edges will be added from the second node onwards.
             self.memory_graph.edge_index = torch.empty((2, 0), dtype=torch.long)
-            print("Initialized memory graph with the first node.")
+            print("Initialized memory graph with the first node.", file=sys.stderr)
         else:
             # 3. Add the new summary vector as a node to self.memory_graph.
             # Add the new node's features.
@@ -140,7 +132,7 @@ class GemmaWithMemory(nn.Module):
             # Update the graph object.
             self.memory_graph.x = new_nodes
             self.memory_graph.edge_index = new_edge_index
-            print(f"Added new node. Graph now has {self.memory_graph.num_nodes} nodes.")
+            print(f"Added new node. Graph now has {self.memory_graph.num_nodes} nodes.", file=sys.stderr)
 
         # TODO:
         # The next step will be to use this graph.
