@@ -15,7 +15,7 @@ Key components:
 ### Memory Management
 
 The memory management is designed to be implicit and transparent, triggered by Gemma's special turn tokens:
-- **Memory Update**: The memory is updated after a full turn is generated (ending with `<end_of_turn>`). The model summarizes the turn and adds it as a new node to the memory graph.
+- **Memory Update**: The memory is updated after for every user call to the generate api. The model creates a pooled vector from the user input and adds it as a new node to the memory graph.
 
 There are no public methods to control the memory; it is all handled internally by the model.
 
