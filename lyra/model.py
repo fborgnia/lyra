@@ -39,6 +39,7 @@ class GemmaWithMemory(nn.Module):
         self.gemma.model.layers[self.injection_layer_idx].register_forward_pre_hook(self._injection_pre_hook)
         self.gemma.model.layers[self.injection_layer_idx].register_forward_hook(self._memory_capture_hook)
 
+        
     def _memory_capture_hook(self, module, input, output):
         """
         This hook runs after the forward pass of the specified layer (layer 8).
@@ -60,7 +61,7 @@ class GemmaWithMemory(nn.Module):
             
             # The input arguments to a decoder layer are a tuple.
             # We need to unpack them, modify them, and return a new tuple.
-            hidden_states, attention_mask = args[0], args[1]
+            hidden_states, attention_mask, position_ids = args[0], args[1], args[2]
             
             # 1. Create a query vector from the incoming hidden states
             query_vector = torch.mean(hidden_states, dim=1)
@@ -70,14 +71,23 @@ class GemmaWithMemory(nn.Module):
                 hidden_states, attention_mask, self.memory_graph, query_vector
             )
             
-            # 3. Deactivate the flag after both capture and injection are done for the prompt.
+            # 3. Create a new position_ids tensor for the modified sequence.
+            memory_position = torch.zeros((1, 1), dtype=position_ids.dtype, device=position_ids.device)
+            modified_position_ids = torch.cat([memory_position, position_ids], dim=1)
+
+            # 4. BUGFIX: Deactivate the flag immediately after injection to prevent this
+            # hook from running on subsequent token generation passes.
             self.is_prompt_processing = False
             
-            # 4. Re-package the arguments for the layer's forward method.
-            # The other arguments (position_ids, etc.) are preserved.
-            new_args = (modified_hidden_states, modified_attention_mask) + args[2:]
+            # 5. Re-package the arguments for the layer's forward method.
+            new_args = (modified_hidden_states, modified_attention_mask, modified_position_ids) + args[3:]
             return new_args
         
+        # If we are in the prompt processing phase but have no memory to inject,
+        # we still need to disable the flag to prevent errors on the next pass.
+        if self.is_prompt_processing:
+            self.is_prompt_processing = False
+
         # If conditions are not met, do nothing.
         return args
 
