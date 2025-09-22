@@ -15,7 +15,6 @@ Key components:
 ### Memory Management
 
 The memory management is designed to be implicit and transparent, triggered by Gemma's special turn tokens:
-- **Memory Reset**: The memory graph is automatically reset when a `<start_of_turn>` token is detected in the input, signaling the beginning of a new conversation.
 - **Memory Update**: The memory is updated after a full turn is generated (ending with `<end_of_turn>`). The model summarizes the turn and adds it as a new node to the memory graph.
 
 There are no public methods to control the memory; it is all handled internally by the model.
