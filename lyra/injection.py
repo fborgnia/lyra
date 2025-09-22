@@ -10,6 +10,8 @@ class MemoryInjectionLayer(nn.Module):
         # Later, it could have its own parameters.
 
     def forward(self, hidden_states, attention_mask, memory_graph, query_vector):
+        # This line is a trick to disable memory injection for testing.
+        #return hidden_states, attention_mask
         """
         Retrieves memory and injects it into the prompt embeddings by prepending it.
         """
