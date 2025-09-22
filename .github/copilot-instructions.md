@@ -30,7 +30,7 @@ To generate the synthetic dataset for training, use the script in `scripts/gener
 
 The training process is divided into two main stages:
 
-- **Stage 1: Semantic Alignment**: Train the summarizer head to create meaningful node embeddings. This is done using a triplet loss function.
+- **Stage 1: Semantic Alignment**: Train the **GNN itself** to refine raw memory vectors into meaningful, semantically-aligned node embeddings. This is done using a triplet loss function.
 - **Stage 2: Retrieval Skill Training**: Fine-tune the model on conversational data. The model learns to use its memory implicitly to improve its responses.
 
 The main training script is `scripts/train.py`.

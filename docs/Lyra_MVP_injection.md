@@ -1,4 +1,7 @@
-### **Memory Injection: A Step-by-Step Design**
+### **Memory Injection:    * **Action**: Inside the GNN, a similarity metric (e.g., dot-product attention) is computed between the `query_vector` and every node (past episode) in the `memory_graph`. The GNN uses its trained message-passing layers to reason over the graph and identify the most relevant nodes.
+   * **Output**: The GNN returns an aggregated **`memory_context`** vector, also of shape `[batch_size, hidden_dim]`. This vector is a blend of the most relevant memories for the current query.
+   * **Note on GNN's Dual Role**: It is important to note that this is the same GNN that is used to **refine** memories during the storage process. Its trainable parameters are optimized to be effective at both creating high-quality memory nodes and retrieving them accurately based on a query.
+2.  **Handling an Empty Memory**: The layer must be robust. If the `memory_graph` is `None` or empty (e.g., at the start of a conversation), the GNN query is skipped, and the `memory_context` is initialized as a zero-vector of the correct shape. This ensures the model can function perfectly even without any prior context.tep-by-Step Design**
 
 **Context:** The main GemmaWithMemory.forward() method is executing. The input has progressed through the initial Gemma layers (1 through 9). We now arrive at our target layer where the MemoryInjectionLayer is integrated.  
 **Input:** The layer receives the sequence of hidden states from the previous Gemma layer.
