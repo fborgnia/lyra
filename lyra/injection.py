@@ -7,6 +7,7 @@ class MemoryInjectionLayer(nn.Module):
         # Layer components will be defined here
         pass
 
-    def forward(self, hidden_states, **kwargs):
+    def forward(self, hidden_states, memory_graph, query_vector):
         # Memory injection logic will go here
-        pass
+        print("Inside MemoryInjectionLayer (TODO: Implement logic).", file=sys.stderr)
+        return hidden_states

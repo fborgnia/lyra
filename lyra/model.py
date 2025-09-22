@@ -5,8 +5,8 @@ from transformers import Gemma3ForCausalLM, AutoTokenizer
 from torch_geometric.data import Data
 
 # These will be implemented later, but we create placeholders for now.
-# from .gnn import EpisodicMemoryGNN
-# from .injection import MemoryInjectionLayer
+from .gnn import EpisodicMemoryGNN
+from .injection import MemoryInjectionLayer
 
 class GemmaWithMemory(nn.Module):
     def __init__(self, model_path='./models/gemma-3-1b-it'):
@@ -25,22 +25,39 @@ class GemmaWithMemory(nn.Module):
         self.end_of_turn_token_id = self.tokenizer.convert_tokens_to_ids('<end_of_turn>')
 
         # 3. Initialize GNN, Injection Layer, and internal memory state
-        # self.gnn = EpisodicMemoryGNN(...)
-        # self.injection_layer = MemoryInjectionLayer(...)
+        self.gnn = EpisodicMemoryGNN()
+        self.injection_layer = MemoryInjectionLayer(self.gnn)
         self.memory_graph = None
 
         # TODO: Integrate the injection layer into the gemma model's layers
-        # e.g., self.gemma.model.layers[10] = self.injection_layer
+        # For now, we will call it manually in the forward pass for demonstration.
 
     def forward(self, input_ids, attention_mask=None, **kwargs):
         # "Instruct-Aware" forward method
-        # Check if <start_of_turn> is in the input and reset memory
-        if self.start_of_turn_token_id in input_ids:
-            print("New conversation detected. Resetting memory.")
+        # Check if <start_of_turn> is in the input and reset memory if it's a new conversation
+        # This simple check assumes the first token of a new convo is <start_of_turn>
+        if input_ids[0][1] == self.start_of_turn_token_id and self.memory_graph is not None:
+            print("New conversation detected. Resetting memory.", file=sys.stderr)
             self.memory_graph = None
         
-        # The actual forward pass will go through the modified Gemma model
-        # which now includes the MemoryInjectionLayer
+        # Get hidden states for the input prompt
+        prompt_outputs = self.gemma(input_ids=input_ids, attention_mask=attention_mask, output_hidden_states=True)
+        prompt_hidden_states = prompt_outputs.hidden_states[-1] # Last layer hidden states
+
+        # If memory exists, query it and inject the context
+        if self.memory_graph is not None and self.memory_graph.num_nodes > 0:
+            print("Querying memory graph...", file=sys.stderr)
+            # 1. Create a query vector from the prompt's hidden states
+            query_vector = torch.mean(prompt_hidden_states, dim=1)
+            
+            # 2. Pass memory and query to the injection layer (which will use the GNN)
+            # This is a placeholder for the real injection mechanism
+            modified_hidden_states = self.injection_layer(prompt_hidden_states, self.memory_graph, query_vector)
+            
+            # In a real implementation, we would pass these modified states to the rest of the model.
+            # For now, we just use the original forward pass.
+        
+        # The actual forward pass for token generation happens inside `generate`
         return self.gemma(input_ids=input_ids, attention_mask=attention_mask, **kwargs)
 
     def generate(self, input_ids, **kwargs):
