@@ -29,58 +29,75 @@ class GemmaWithMemory(nn.Module):
         self.injection_layer = MemoryInjectionLayer(self.gnn)
         self.memory_graph = None
 
-        # TODO: Integrate the injection layer into the gemma model's layers
+        # 4. Configure the injection layer and state management
+        self.injection_layer_idx = 8
+        self.is_prompt_processing = False
+        self.last_layer_8_output = None
+
+        # TODO: Register the hooks for memory injection and generation.
         # For now, we will call it manually in the forward pass for demonstration.
+        self.gemma.model.layers[self.injection_layer_idx].register_forward_pre_hook(self._injection_pre_hook)
+        self.gemma.model.layers[self.injection_layer_idx].register_forward_hook(self._memory_capture_hook)
+
+    def _memory_capture_hook(self, module, input, output):
+        """
+        This hook runs after the forward pass of the specified layer (layer 8).
+        It captures the output hidden state for later use in memory generation.
+        """
+        # The output of a decoder layer is a tuple; the hidden state is the first element.
+        # We only want to capture this during the initial prompt processing phase.
+        if self.is_prompt_processing:
+            print(f"Running capture hook on layer {self.injection_layer_idx}...", file=sys.stderr)
+            self.last_layer_8_output = output[0].detach()
+
+    def _injection_pre_hook(self, module, args):
+        """
+        This hook runs before the forward pass of the specified layer (layer 8).
+        It injects memory into the hidden states if conditions are met.
+        """
+        if self.is_prompt_processing and self.memory_graph is not None and self.memory_graph.num_nodes > 0:
+            print(f"Running injection pre-hook on layer {self.injection_layer_idx}...", file=sys.stderr)
+            
+            # The input arguments to a decoder layer are a tuple.
+            # We need to unpack them, modify them, and return a new tuple.
+            hidden_states, attention_mask = args[0], args[1]
+            
+            # 1. Create a query vector from the incoming hidden states
+            query_vector = torch.mean(hidden_states, dim=1)
+            
+            # 2. Use the existing injection_layer to get modified states and mask
+            modified_hidden_states, modified_attention_mask = self.injection_layer(
+                hidden_states, attention_mask, self.memory_graph, query_vector
+            )
+            
+            # 3. Deactivate the flag after both capture and injection are done for the prompt.
+            self.is_prompt_processing = False
+            
+            # 4. Re-package the arguments for the layer's forward method.
+            # The other arguments (position_ids, etc.) are preserved.
+            new_args = (modified_hidden_states, modified_attention_mask) + args[2:]
+            return new_args
+        
+        # If conditions are not met, do nothing.
+        return args
 
     def forward(self, input_ids, attention_mask=None, **kwargs):
         # "Instruct-Aware" forward method
-        print("Running forward pass...", file=sys.stdout)
-        
-        # Get the initial token embeddings for the input prompt.
-        # These are the embeddings that the model expects as `inputs_embeds`.
-        prompt_embeds = self.gemma.get_input_embeddings()(input_ids)
-
-        if self.memory_graph is not None and self.memory_graph.num_nodes > 0:
-            print("Querying memory graph...", file=sys.stdout)
-            # 1. Create a query vector. For this, we need a richer representation,
-            # so we run a separate forward pass to get the last hidden state.
-            with torch.no_grad():
-                prompt_outputs = self.gemma(input_ids=input_ids, attention_mask=attention_mask, output_hidden_states=True)
-                prompt_hidden_states = prompt_outputs.hidden_states[-1]
-            query_vector = torch.mean(prompt_hidden_states, dim=1)
-            
-            # 2. Pass the initial embeddings (not last hidden state) to the injection layer.
-            modified_embeds, attention_mask = self.injection_layer(
-                prompt_embeds, attention_mask, self.memory_graph, query_vector
-            )
-        
-        # Return the appropriate embeddings and attention mask.
-        if 'modified_embeds' in locals():
-            return modified_embeds, attention_mask
-        else:
-            return prompt_embeds, attention_mask
+        # With the hook-based approach, this forward method is no longer needed for injection.
+        # We will simplify it to a standard forward pass.
+        # The hooks will handle the memory operations automatically.
+        return self.gemma(input_ids=input_ids, attention_mask=attention_mask, **kwargs)
 
     def generate(self, input_ids, **kwargs):
         print(f"Generating Answer", file=sys.stderr)
         # Custom generate method to wrap the standard generate function
 
-        # 1. Call the forward pass to get potentially memory-infused embeddings.
-        # The forward pass handles the memory retrieval and injection logic.
-        final_prompt_embeds, final_attention_mask = self.forward(input_ids, **kwargs)
+        # 1. Set the flag to enable the hooks for this prompt.
+        self.is_prompt_processing = True
         
-        # BUGFIX: The 'attention_mask' in kwargs is for the original input_ids.
-        # We must use the 'final_attention_mask' returned by the forward pass,
-        # as it may have been modified (e.g., by prepending memory).
-        # We also remove it from kwargs to avoid passing it twice to `gemma.generate`.
-        if 'attention_mask' in kwargs:
-            del kwargs['attention_mask']
-
-        # 2. Generate the response using the (potentially modified) embeddings.
-        print(f"Shape of inputs_embeds: {final_prompt_embeds.shape}", file=sys.stderr)
-        print(f"Shape of attention_mask: {final_attention_mask.shape}", file=sys.stderr)
+        # 2. Generate the response. The hooks will be triggered automatically.
         outputs = self.gemma.generate(
-            inputs_embeds=final_prompt_embeds, 
-            attention_mask=final_attention_mask, 
+            input_ids=input_ids,
             **kwargs
         )
         
@@ -88,25 +105,26 @@ class GemmaWithMemory(nn.Module):
         # The output is a tensor of token IDs, shape [batch_size, sequence_length].
         if outputs[0][-1] == self.end_of_turn_token_id:
              print("Turn complete. Triggering memory update.", file=sys.stderr)
-             # To create the memory, we need the prompt's hidden states.
-             # We run a forward pass on the original input_ids to get them.
-             with torch.no_grad():
-                prompt_outputs = self.gemma(input_ids=input_ids, output_hidden_states=True)
-                prompt_hidden_states = prompt_outputs.hidden_states[-1]
-             self._update_memory(prompt_hidden_states)
+             # The memory capture hook will have saved the required hidden state.
+             self._update_memory()
 
         # Return only the generated sequences to maintain standard behavior
         return outputs
 
-    def _update_memory(self, prompt_hidden_states):
+    def _update_memory(self):
         """
-        Internal method to update the memory graph using the prompt's hidden states.
+        Internal method to update the memory graph using the captured hidden state from layer 8.
         """
-        print(f"Updating memory using the prompt's context.", file=sys.stderr)
+        # This will be updated to use self.last_layer_8_output from the capture hook.
+        if self.last_layer_8_output is None:
+            print("Warning: _update_memory called but no hidden state was captured.", file=sys.stderr)
+            return
+
+        prompt_hidden_state = self.last_layer_8_output
+        print(f"Updating memory using hidden state from layer {self.injection_layer_idx}.", file=sys.stderr)
         
         # 1. Pool the prompt's hidden states to create a single summary vector.
-        # We use mean pooling across the sequence of prompt tokens.
-        turn_summary_vector = torch.mean(prompt_hidden_states, dim=1)
+        turn_summary_vector = torch.mean(prompt_hidden_state, dim=1)
 
         print(f"Created turn summary vector with shape: {turn_summary_vector.shape}", file=sys.stderr)
 
@@ -134,7 +152,7 @@ class GemmaWithMemory(nn.Module):
             self.memory_graph.edge_index = new_edge_index
             print(f"Added new node. Graph now has {self.memory_graph.num_nodes} nodes.", file=sys.stderr)
 
-        # TODO:
-        # The next step will be to use this graph.
+        # Reset the captured state to prevent re-use.
+        self.last_layer_8_output = None
         pass
 

@@ -29,6 +29,7 @@ class MemoryInjectionLayer(nn.Module):
         # 3. Prepend the memory to the original prompt embeddings.
         # hidden_states (here, embeddings) shape: [batch, seq_len, hidden_dim]
         # modified_embeds shape: [batch, 1 + seq_len, hidden_dim]
+        #modified_embeds = torch.cat([memory_to_prepend, hidden_states], dim=1)
         modified_embeds = torch.cat([memory_to_prepend, hidden_states], dim=1)
 
         # 4. Create a new attention mask for the prepended memory.
