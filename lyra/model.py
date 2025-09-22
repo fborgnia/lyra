@@ -33,22 +33,55 @@ class GemmaWithMemory(nn.Module):
         print("Initialized empty memory graph.", file=sys.stderr)
 
         # 4. Configure the injection layer and state management
-        self.capture_layer_idx = 8
-        self.is_prompt_processing = False
+        self.memory_layer_idx = 8
+        self.is_prompt_processing_capture = False
+        self.is_prompt_processing_injection = False
 
         # Register the hook for memory capture. Injection is disabled for now.
-        self.gemma.model.layers[self.capture_layer_idx].register_forward_hook(self._memory_capture_hook)
+        self.gemma.model.layers[self.memory_layer_idx].register_forward_pre_hook(self._memory_injection_hook)
+        self.gemma.model.layers[self.memory_layer_idx].register_forward_hook(self._memory_capture_hook)
 
-        
+    def _memory_injection_hook(self, module, args):
+        """
+        This hook runs BEFORE the forward pass of the specified layer.
+        It injects memory into the hidden states if conditions are met.
+        """
+        if self.is_prompt_processing_injection and len(args) >= 3 :
+            print(f"Running injection pre-hook on layer {self.memory_layer_idx}...", file=sys.stdout)
+            # The input arguments to a decoder layer are a tuple.
+            # We need to unpack them, modify them, and return a new tuple.
+            hidden_states, attention_mask, position_ids = args[0], args[1], args[2]
+            
+            # 1. Create a query vector from the incoming hidden states
+            query_vector = torch.mean(hidden_states, dim=1)
+            
+            # 2. Use the existing injection_layer to get modified states and mask
+            modified_hidden_states, modified_attention_mask = self.injection_layer(
+                hidden_states, attention_mask, self.memory_graph, query_vector
+            )
+            
+            # 3. Create a new position_ids tensor for the modified sequence.
+            memory_position = torch.zeros((1, 1), dtype=position_ids.dtype, device=position_ids.device)
+            modified_position_ids = torch.cat([memory_position, position_ids], dim=1)
+
+            # 4. Re-package the arguments for the layer's forward method.
+            new_args = (modified_hidden_states, modified_attention_mask, modified_position_ids) + args[3:]
+            self.is_prompt_processing_injection = False
+            return new_args
+
+        # If conditions are not met, do nothing.
+        return args
+
     def _memory_capture_hook(self, module, input, output):
         """
-        This hook runs after the forward pass of the specified layer.
-        It captures the output hidden state for later use in memory generation.
+        This hook runs before the forward pass of the specified layer (layer 8).
+        It injects memory into the hidden states if conditions are met.
         """
-        if self.is_prompt_processing:
-            print(f"Running capture hook on layer {self.capture_layer_idx}...", file=sys.stdout)
+        if self.is_prompt_processing_capture :
+            print(f"Running memory hook on layer {self.memory_layer_idx}...", file=sys.stdout)
             self._update_memory(output[0].detach())
-            self.is_prompt_processing = False
+            self.is_prompt_processing_capture = False
+            
 
     def forward(self, input_ids, attention_mask=None, **kwargs):
         # The hooks will handle the memory operations automatically.
@@ -57,8 +90,9 @@ class GemmaWithMemory(nn.Module):
     def generate(self, input_ids, **kwargs):
         print(f"Generating Answer", file=sys.stdout)
         # 1. Set the flag to enable the capture hook for this prompt. the hook will reset it.
-        self.is_prompt_processing = True
-        
+        self.is_prompt_processing_injection = True
+        self.is_prompt_processing_capture = True
+    
         # 2. Generate the response. The hook will be triggered automatically.
         outputs = self.gemma.generate(
             input_ids=input_ids,
@@ -71,7 +105,7 @@ class GemmaWithMemory(nn.Module):
         Internal method to update the memory graph using the captured hidden state.
         """
         
-        print(f"Updating memory using hidden state from layer {self.capture_layer_idx}.", file=sys.stdout)
+        print(f"Updating memory using hidden state from layer {self.memory_layer_idx}.", file=sys.stdout)
         
         # 1. Pool the prompt's hidden states to create a single summary vector.
         turn_summary_vector = torch.mean(prompt_hidden_state, dim=1)
