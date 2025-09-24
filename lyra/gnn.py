@@ -1,43 +1,48 @@
-# Phase 1: Standalone GNN Module
+import sys
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch_geometric.data import Data
-import sys
 
 class EpisodicMemoryGNN(nn.Module):
-    def __init__(self, embedding_dim):
+    """
+    A Graph Neural Network module responsible for finding the most relevant memory.
+    """
+    def __init__(self, model):
         super().__init__()
-        # This is the trainable component. It's a standard linear layer that will
-        # learn to project the query vector into a more effective search space.
+        self.model = model
+        embedding_dim = self.model.config.hidden_size
         self.query_projection = nn.Linear(embedding_dim, embedding_dim)
 
-    def forward(self, memory_graph, query_vector):
+    def forward(self, memory_graph, query_input_ids):
         """
-        Performs a single pass of attention over the memory graph.
-
-        Args:
-            memory_graph (torch_geometric.data.Data): The current memory graph.
-            query_vector (torch.Tensor): The query vector from the current prompt.
-
-        Returns:
-            torch.Tensor: The context vector (retrieved memory).
+        Finds the index of the most relevant memory node from the memory graph list.
         """
-        memory_nodes = memory_graph.x
-        
-        if memory_nodes.shape[0] == 0:
-            return torch.zeros_like(query_vector)
+        # --- THE CRITICAL FIX ---
+        # 1. Extract the summary vectors from the list of dictionaries.
+        memory_vectors = [item["vector"] for item in memory_graph]
 
-        # 1. Apply the trainable projection to the incoming query vector.
+        # 2. If the list is empty, there's nothing to do.
+        if not memory_vectors:
+            return -1 # Return an invalid index
+
+        # 3. Stack the list of vectors into a single tensor for processing.
+        memory_vectors_tensor = torch.cat(memory_vectors, dim=0).to(self.model.device)
+
+        # 4. Create the query vector from the current input_ids.
+        with torch.no_grad():
+            query_embedding = self.model.model.embed_tokens(query_input_ids)
+            query_vector = torch.mean(query_embedding, dim=1)
+
+        # 5. Project both the query and the memory nodes into the learned search space.
         projected_query = self.query_projection(query_vector)
+        projected_memory_nodes = self.query_projection(memory_vectors_tensor)
 
-        # 2. Calculate similarity scores using the *projected* query.
-        attention_scores = torch.matmul(projected_query, memory_nodes.t())
-        attention_weights = F.softmax(attention_scores, dim=-1)
-        
-        print(f"GNN Attention Weights: {attention_weights.tolist()}", file=sys.stdout)
+        # 6. Calculate similarity scores (dot-product attention) in the projected space.
+        attention_scores = torch.matmul(projected_query, projected_memory_nodes.t())
+        print(f"GNN Attention Scores: {attention_scores.tolist()}", file=sys.stdout)
 
-        # 3. Compute the context vector as a weighted sum of the original memories.
-        context_vector = torch.matmul(attention_weights, memory_nodes)
+        # 7. Find the index of the memory with the highest score.
+        best_memory_index = torch.argmax(attention_scores, dim=-1).item()
+        print(f"GNN chose memory index: {best_memory_index}", file=sys.stdout)
 
-        return context_vector
+        return best_memory_index

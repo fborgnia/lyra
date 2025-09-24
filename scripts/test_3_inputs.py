@@ -9,70 +9,66 @@ from lyra.model import GemmaWithMemory
 model = GemmaWithMemory()
 
 # --- Turn 1: Create the memory ---
-# This turn's information will be stored in the memory graph, but NOT passed in the next prompt.
+# This turn's information will be stored in the memory graph and asked in the last prompt.
 print("--- Turn 1 ---")
-prompt1 = "<start_of_turn>user\nMy name is Federico.<end_of_turn>\n<start_of_turn>model\n"
-inputs1 = model.tokenizer(prompt1, return_tensors="pt")
+prompt = "<start_of_turn>user\nFederico has a red keyring.<end_of_turn>\n<start_of_turn>model\n"
+inputs = model.tokenizer(prompt, return_tensors="pt")
 
-outputs1 = model.generate(
-    input_ids=inputs1["input_ids"],
-    attention_mask=inputs1["attention_mask"],
-    max_new_tokens=150,
-    eos_token_id=model.end_of_turn_token_id
+outputs = model.generate(
+    input_ids=inputs["input_ids"],
+    attention_mask=inputs["attention_mask"],
+    max_new_tokens=150
 )
-full_text1 = model.tokenizer.decode(outputs1[0], skip_special_tokens=False)
-print(f"\n--- Model Output (Turn 1) ---\n{full_text1}\n--------------------\n")
+full_text = model.tokenizer.decode(outputs[0], skip_special_tokens=False)
+print(f"\n--- Model Output (Turn 1) ---\n{full_text}\n--------------------\n")
 
 # --- Check memory graph ---
 if model.memory_graph:
-    print(f"Memory graph has {model.memory_graph.num_nodes} nodes after turn 1.")
+    print(f"Memory graph has {len(model.memory_graph)} nodes after turn 1.")
 else:
     print("Memory graph is empty after turn 1.")
 
 
-# --- Turn 2: Force retrieval from memory to generate an answer, don't expect it to be smart, just look for the logs in the query vector ---
+# --- Turn 2: Create another memory ---
+# This turn's information will be stored in the memory graph, but NOT asked in the next prompt.
 print("--- Turn 2 ---")
-prompt2_text = "<start_of_turn>user\nMy name is Juan.<end_of_turn>\n<start_of_turn>model\n"
-inputs2 = model.tokenizer(prompt2_text, return_tensors="pt")
+prompt = "<start_of_turn>user\nDaniela has a green keyring.<end_of_turn>\n<start_of_turn>model\n"
+inputs = model.tokenizer(prompt, return_tensors="pt")
 
-# NOTE: We are ONLY passing the second prompt's inputs.
-# The model cannot see the context from Turn 1 in its input_ids.
-# It MUST use the memory graph to answer correctly.
-outputs2 = model.generate(
-    input_ids=inputs2["input_ids"],
-    attention_mask=inputs2["attention_mask"],
-    max_new_tokens=150,
-    eos_token_id=model.end_of_turn_token_id
+outputs = model.generate(
+    input_ids=inputs["input_ids"],
+    attention_mask=inputs["attention_mask"],
+    max_new_tokens=150
 )
-full_text2 = model.tokenizer.decode(outputs2[0], skip_special_tokens=False)
-print(f"\n--- Model Output (Turn 2) ---\n{full_text2}\n--------------------")
+full_text = model.tokenizer.decode(outputs[0], skip_special_tokens=False)
+print(f"\n--- Model Output (Turn 2) ---\n{full_text}\n--------------------\n")
 
-# --- Check memory graph again ---
+# --- Check memory graph ---
 if model.memory_graph:
-    print(f"Memory graph has {model.memory_graph.num_nodes} nodes after turn 2.")
+    print(f"Memory graph has {len(model.memory_graph)} nodes after turn 2.")
 else:
     print("Memory graph is empty after turn 2.")
 
 
-# --- Turn 3: Force retrieval from memory to generate another answer, the logs in the query vector should indicate a split memory attention across the nodoes---
+
+# --- Turn 3: ask about first memory ---
+# This turn's output should answer the first prompt.
 print("--- Turn 3 ---")
-prompt2_text = "<start_of_turn>user\nMy name is Alfred.<end_of_turn>\n<start_of_turn>model\n"
-inputs2 = model.tokenizer(prompt2_text, return_tensors="pt")
+prompt = "<start_of_turn>user\nWhat is the color of Federico's keyring?.<end_of_turn>\n<start_of_turn>model\n"
+inputs = model.tokenizer(prompt, return_tensors="pt")
 
-# NOTE: We are ONLY passing the second prompt's inputs.
-# The model cannot see the context from Turn 1 in its input_ids.
-# It MUST use the memory graph to answer correctly.
-outputs2 = model.generate(
-    input_ids=inputs2["input_ids"],
-    attention_mask=inputs2["attention_mask"],
-    max_new_tokens=150,
-    eos_token_id=model.end_of_turn_token_id
+outputs = model.generate(
+    input_ids=inputs["input_ids"],
+    attention_mask=inputs["attention_mask"],
+    max_new_tokens=150
 )
-full_text2 = model.tokenizer.decode(outputs2[0], skip_special_tokens=False)
-print(f"\n--- Model Output (Turn 3) ---\n{full_text2}\n--------------------")
+full_text = model.tokenizer.decode(outputs[0], skip_special_tokens=False)
+print(f"\n--- Model Output (Turn 3) ---\n{full_text}\n--------------------\n")
 
-# --- Check memory graph again ---
+# --- Check memory graph ---
 if model.memory_graph:
-    print(f"Memory graph has {model.memory_graph.num_nodes} nodes after turn 3.")
+    print(f"Memory graph has {len(model.memory_graph)} nodes after turn 3.")
 else:
     print("Memory graph is empty after turn 3.")
+
+

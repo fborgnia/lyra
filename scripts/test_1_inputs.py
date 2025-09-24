@@ -18,7 +18,6 @@ outputs1 = model.generate(
     input_ids=inputs1["input_ids"],
     attention_mask=inputs1["attention_mask"],
     max_new_tokens=150,
-    eos_token_id=model.end_of_turn_token_id
 )
 full_text1 = model.tokenizer.decode(outputs1[0], skip_special_tokens=False)
 print(f"\n--- Model Output (Turn 1) ---\n{full_text1}\n--------------------\n")

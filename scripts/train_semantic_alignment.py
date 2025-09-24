@@ -12,12 +12,13 @@ import torch.optim as optim
 
 def main():
     """
-    Main function to run the semantic alignment training loop.
+    Main function to run the semantic alignment training loop using a triplet loss.
     """
     # --- 1. Configuration ---
     dataset_path = Path(__file__).parent.parent / "data" / "semantic_alignment.json"
     num_epochs = 3
     learning_rate = 1e-4
+    batch_size = 4 # Using a small batch size for triplet loss
 
     # --- 2. Device Selection ---
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -30,46 +31,43 @@ def main():
     print(f"Loaded {len(dataset)} samples.")
 
     # --- 4. Initialize Model and Tokenizer ---
-    
     model = GemmaWithMemory()
     tokenizer = model.tokenizer
+    # Set padding token if it's not already set
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
     model.to(device)
     print("Model and tokenizer loaded successfully.")
 
-    # --- 5. Configure Optimizer (Step 3 of the plan) ---
-    # The key step: only pass the GNN's parameters to the optimizer.
-    # This ensures that the base Gemma model remains frozen.
+    # --- 5. Configure Optimizer ---
     optimizer = optim.Adam(model.gnn.parameters(), lr=learning_rate)
     print("Optimizer configured to train only the GNN.")
 
-    # --- 6. The Training Loop (Step 2 of the plan) ---
+    # --- 6. The Training Loop ---
     print(f"Starting training for {num_epochs} epochs...")
     for epoch in range(num_epochs):
         total_epoch_loss = 0
-        for i, sample in enumerate(dataset):
-            context = sample["context"]
-            user_input = sample["user_input"]
-            answer = sample["answer"]
+        # Simple batching logic
+        for i in range(0, len(dataset), batch_size):
+            batch = dataset[i:i+batch_size]
+            if len(batch) < 2: continue # Triplet loss needs at least 2 samples for negative selection
 
-            # --- Turn 1: Memory Seeding ---
-            # Process the context to populate the model's memory.
-            # We don't need the output, just the side effect of memory creation.
-            context_ids = tokenizer(context, return_tensors="pt").to(device)
-            model.generate(**context_ids, max_length=10) # max_length is minimal
+            contexts = [sample["context"] for sample in batch]
+            queries = [sample["user_input"] for sample in batch]
 
-            # --- Turn 2: Training on the Question ---
-            # Prepare inputs and labels for the forward pass.
-            # The model should learn to generate the 'answer' given the 'user_input'
-            # by using the memory of the 'context'.
-            input_ids = tokenizer(user_input, return_tensors="pt").input_ids.to(device)
-            labels = tokenizer(answer, return_tensors="pt").input_ids.to(device)
+            # Tokenize contexts and queries with padding
+            context_inputs = tokenizer(contexts, return_tensors="pt", padding=True, truncation=True).to(device)
+            query_inputs = tokenizer(queries, return_tensors="pt", padding=True, truncation=True).to(device)
 
             # Zero the gradients before the forward pass
             optimizer.zero_grad()
 
-            # Forward pass: The model computes the loss internally
-            outputs = model(input_ids=input_ids, labels=labels)
-            loss = outputs.loss
+            # Forward pass: The model computes the triplet loss internally
+            outputs = model(
+                context_input_ids=context_inputs.input_ids,
+                query_input_ids=query_inputs.input_ids
+            )
+            loss = outputs["loss"]
 
             # Backward pass and optimization
             loss.backward()
@@ -77,23 +75,19 @@ def main():
 
             total_epoch_loss += loss.item()
 
-            # --- Memory Reset ---
-            # Crucial: Reset the memory for the next independent sample.
-            model.reset_memory()
+            if (i // batch_size + 1) % 10 == 0:
+                print(f"  Epoch {epoch+1}/{num_epochs}, Batch {i//batch_size + 1}, Loss: {loss.item():.4f}")
 
-            if (i + 1) % 10 == 0:
-                print(f"  Epoch {epoch+1}/{num_epochs}, Sample {i+1}/{len(dataset)}, Loss: {loss.item():.4f}")
-
-        avg_epoch_loss = total_epoch_loss / len(dataset)
+        avg_epoch_loss = total_epoch_loss / (len(dataset) / batch_size)
         print(f"--- Epoch {epoch+1} finished. Average Loss: {avg_epoch_loss:.4f} ---")
 
     print("Training finished.")
 
-    # --- 7. Save the trained GNN weights (optional) ---
-    # For now, we'll just print a success message. A real implementation
-    # would save model.gnn.state_dict().
-    print("GNN training complete. To save the GNN, you would call `torch.save(model.gnn.state_dict(), 'gnn_weights.pth')`")
+    # --- 7. Save the trained GNN weights ---
+    gnn_weights_path = Path(__file__).parent.parent / "models" / "gnn_semantic_alignment.pth"
+    gnn_weights_path.parent.mkdir(exist_ok=True)
+    torch.save(model.gnn.state_dict(), gnn_weights_path)
+    print(f"GNN weights saved to {gnn_weights_path}")
 
 if __name__ == "__main__":
     main()
-

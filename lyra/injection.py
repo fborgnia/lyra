@@ -1,48 +1,42 @@
+import sys
 import torch
 import torch.nn as nn
-import sys
 
 class MemoryInjectionLayer(nn.Module):
-    def __init__(self, gnn):
+    """
+    This layer retrieves a fully-formatted memory turn and concatenates it
+    with the current turn to create a valid multi-turn prompt.
+    """
+    def __init__(self, model):
         super().__init__()
-        self.gnn = gnn
-        # For now, this layer just adds the retrieved context.
-        # Later, it could have its own parameters.
+        self.model = model
 
-    def forward(self, hidden_states, attention_mask, memory_graph, query_vector):
-        # This line is a trick to disable memory injection for testing.
-        #return hidden_states, attention_mask
-        """
-        Retrieves memory and injects it into the prompt embeddings by prepending it.
-        """
-        # 1. Use the GNN to retrieve the relevant memory context
-        # retrieved_memory shape: [batch, hidden_dim]
-        retrieved_memory = self.gnn(memory_graph, query_vector)
-        
-        print("Injecting retrieved memory into the model.", file=sys.stdout)
-        
-        # 2. Prepare memory for prepending. It needs a sequence length of 1.
-        # The retrieved memory is a hidden state, but we need to treat it as an embedding.
-        # Shape becomes: [batch, 1, hidden_dim]
-        memory_to_prepend = retrieved_memory.unsqueeze(1)
+    def forward(self, current_input_ids, current_attention_mask):
+        if not self.model.memory_graph:
+            print("No memory to inject.", file=sys.stdout)
+            return current_input_ids, current_attention_mask
 
-        # 3. Prepend the memory to the original prompt embeddings.
-        # hidden_states (here, embeddings) shape: [batch, seq_len, hidden_dim]
-        # modified_embeds shape: [batch, 1 + seq_len, hidden_dim]
-        #modified_embeds = torch.cat([memory_to_prepend], dim=1)
-        modified_embeds = torch.cat([memory_to_prepend, hidden_states], dim=1)
+        best_memory_index = self.model.gnn(self.model.memory_graph, current_input_ids)
         
+        if best_memory_index == -1:
+            return current_input_ids, current_attention_mask
 
-        # 4. Create a new attention mask for the prepended memory.
-        # It's a tensor of ones with shape [batch, 1].
-        memory_attention_mask = torch.ones(
-            (attention_mask.shape[0], 1), 
-            dtype=attention_mask.dtype, 
-            device=attention_mask.device
-        )
+        print(f"Injecting memory index {best_memory_index} as text.", file=sys.stdout)
 
-        # 5. Prepend the memory's attention mask to the original attention mask.
-        # final_attention_mask shape: [batch, 1 + seq_len]
-        final_attention_mask = torch.cat([memory_attention_mask, attention_mask], dim=1)
+        # 1. Retrieve the full, templated input_ids of the chosen memory turn
+        retrieved_memory_ids = self.model.memory_graph[best_memory_index]["input_ids"].to(self.model.device)
+
+        # 2. THE CRITICAL FIX: Remove the <bos> token from the CURRENT turn
+        # The retrieved memory will provide the one and only <bos> token for the sequence.
+        if current_input_ids[0, 0] == self.model.tokenizer.bos_token_id:
+            current_input_ids_cleaned = current_input_ids[:, 1:]
+        else:
+            current_input_ids_cleaned = current_input_ids
         
-        return modified_embeds, final_attention_mask
+        # 3. Concatenate the two turns to form a valid multi-turn prompt
+        modified_input_ids = torch.cat([retrieved_memory_ids, current_input_ids_cleaned], dim=1)
+        
+        # 4. Create a new attention mask for the full sequence
+        modified_attention_mask = torch.ones_like(modified_input_ids)
+
+        return modified_input_ids, modified_attention_mask

@@ -2,7 +2,7 @@ import sys
 import torch
 import torch.nn as nn
 from transformers import Gemma3ForCausalLM, AutoTokenizer
-from torch_geometric.data import Data
+from pathlib import Path
 
 from .gnn import EpisodicMemoryGNN
 from .injection import MemoryInjectionLayer
@@ -11,149 +11,110 @@ class GemmaWithMemory(Gemma3ForCausalLM):
     """
     A self-contained Gemma model that inherits from Gemma3ForCausalLM and integrates
     an episodic memory graph. It overrides the `generate` method for inference and
-    the `forward` method for training.
+    the `forward` method for training the GNN with a triplet loss.
     """
-    def __init__(self, model_path='./models/gemma-3-1b-it'):
-        # 1. Load the pretrained Gemma3ForCausalLM model using the recommended 'eager' attention.
+    def __init__(self, model_path='./models/gemma-3-1b-it', gnn_weights_path='.models/gnn_semantic_alignment.pth'):
+        # 1. Load the pretrained Gemma3ForCausalLM model and tokenizer
         base_model = Gemma3ForCausalLM.from_pretrained(model_path, attn_implementation="eager")
-        
-        # Initialize the parent class with the loaded model's config
         super().__init__(base_model.config)
-        # Load the state dict from the loaded model
         self.load_state_dict(base_model.state_dict())
         
-        # 2. Load the tokenizer
         self.tokenizer = AutoTokenizer.from_pretrained(model_path)
-        self.end_of_turn_token_id = self.tokenizer.encode('<end_of_turn>', add_special_tokens=False)[0]
+        
+        # Define special tokens for chat templating
+        self.sot_token_id = self.tokenizer.encode('<start_of_turn>', add_special_tokens=False)[0]
+        self.eot_token_id = self.tokenizer.encode('<end_of_turn>', add_special_tokens=False)[0]
+        self.user_token_id = self.tokenizer.encode('user\n', add_special_tokens=False)[0]
+        self.model_token_id = self.tokenizer.encode('model\n', add_special_tokens=False)[0]
 
-        # 3. Freeze the base model parameters
+        # 2. Freeze the base model parameters
         for param in self.parameters():
             param.requires_grad = False
 
-        # 4. Initialize GNN, Injection Layer, and an empty memory graph for INFERENCE
-        self.gnn = EpisodicMemoryGNN(embedding_dim=self.config.hidden_size)
-        self.injection_layer = MemoryInjectionLayer(self.gnn)
-        hidden_size = self.config.hidden_size
-        self.memory_graph = Data(x=torch.empty((0, hidden_size)))
-        self.memory_graph.edge_index = torch.empty((2, 0), dtype=torch.long)
+        # 3. Initialize GNN and load trained weights
+        self.gnn = EpisodicMemoryGNN(self)
+        self.injection_layer = MemoryInjectionLayer(self)
+
+        # 5. Initialize an enhanced memory structure
+        self.memory_graph = []
         print("Initialized empty memory graph.", file=sys.stderr)
 
-    def forward(self, input_ids=None, attention_mask=None, labels=None, inputs_embeds=None,
-                context_turns_input_ids=None, current_turn_input_ids=None, **kwargs):
+        # 6. Define the loss function for GNN training
+        self.triplet_loss = nn.TripletMarginLoss(margin=1.0, p=2)
+
+    def forward(self, context_input_ids=None, query_input_ids=None, **kwargs):
         """
         The forward pass handles both training and inference calls.
-        - For training, it expects `context_turns_input_ids` and `current_turn_input_ids`.
-        - For inference (called by `generate`), it expects standard arguments like `inputs_embeds`.
         """
         # --- Case 1: Training Path ---
-        # Check for the presence of our custom training arguments.
-        if context_turns_input_ids is not None and current_turn_input_ids is not None:
-            # --- 1a. Simulate Conversation to Build Memory Graph ---
-            training_memory_graph = Data(x=torch.empty((0, self.config.hidden_size), device=self.device))
-            training_memory_graph.edge_index = torch.empty((2, 0), dtype=torch.long, device=self.device)
+        if context_input_ids is not None and query_input_ids is not None:
+            with torch.no_grad():
+                context_embeddings = self.model.embed_tokens(context_input_ids)
+                query_embeddings = self.model.embed_tokens(query_input_ids)
+                context_vectors = torch.mean(context_embeddings, dim=1)
+                query_vectors = torch.mean(query_embeddings, dim=1)
 
-            for turn_input_ids in context_turns_input_ids:
-                turn_embeddings = self.model.embed_tokens(turn_input_ids)
-                turn_summary_vector = torch.mean(turn_embeddings, dim=1)
-                
-                existing_nodes = training_memory_graph.x
-                num_existing_nodes = existing_nodes.shape[0]
-                new_nodes = torch.cat([existing_nodes, turn_summary_vector], dim=0)
-                
-                if num_existing_nodes > 0:
-                    prev_node_idx = num_existing_nodes - 1
-                    new_node_idx = num_existing_nodes
-                    new_edge = torch.tensor([[prev_node_idx], [new_node_idx]], dtype=torch.long, device=self.device)
-                    new_edge_index = torch.cat([training_memory_graph.edge_index, new_edge], dim=1)
-                else:
-                    new_edge_index = training_memory_graph.edge_index
-                
-                training_memory_graph.x = new_nodes
-                training_memory_graph.edge_index = new_edge_index
+            anchor = self.gnn.query_projection(query_vectors)
+            positive = self.gnn.query_projection(context_vectors)
 
-            # --- 1b. Perform Injection for the Current Turn ---
-            initial_hidden_states = self.model.embed_tokens(current_turn_input_ids)
-            query_vector = torch.mean(initial_hidden_states, dim=1)
-            current_attention_mask = torch.ones_like(current_turn_input_ids)
+            batch_size = anchor.shape[0]
+            if batch_size < 2:
+                return {"loss": torch.tensor(0.0, device=self.device, requires_grad=True)} # Cannot compute loss for batch size < 2
+            
+            negative_indices = torch.arange(batch_size, device=self.device).roll(shifts=1, dims=0)
+            negative = positive[negative_indices]
 
-            modified_hidden_states, modified_attention_mask = self.injection_layer(
-                initial_hidden_states, current_attention_mask, training_memory_graph, query_vector
-            )
-
-            # --- 1c. Delegate for Loss Calculation ---
-            return super().forward(
-                input_ids=None,
-                inputs_embeds=modified_hidden_states,
-                attention_mask=modified_attention_mask,
-                labels=labels,
-                **kwargs
-            )
+            loss = self.triplet_loss(anchor, positive, negative)
+            return {"loss": loss}
 
         # --- Case 2: Inference Path ---
-        # If training arguments are not present, assume it's an inference call from `generate`.
-        # Simply pass all arguments to the parent class's forward method.
-        return super().forward(
-            input_ids=input_ids,
-            attention_mask=attention_mask,
-            labels=labels,
-            inputs_embeds=inputs_embeds,
-            **kwargs
-        )
+        return super().forward(**kwargs)
 
     def generate(self, input_ids, **kwargs):
         """
         Overrides the main generate method for INFERENCE.
+        Injects text-based memory before calling the base model's generate method.
         """
-        # --- 1. Pre-computation for Memory Operations (Inference) ---
-        if input_ids is not None:
-            print("GemmaWithMemory: Pre-computation for memory operations.", file=sys.stdout)
-            
-            initial_hidden_states = self.model.embed_tokens(input_ids)
-            query_vector = torch.mean(initial_hidden_states, dim=1)
-            attention_mask = kwargs.get("attention_mask")
-            if attention_mask is None:
-                attention_mask = torch.ones_like(input_ids)
+        if input_ids is None:
+            return super().generate(**kwargs)
 
-            # --- Memory Injection (using stateful inference graph) ---
-            modified_hidden_states, modified_attention_mask = self.injection_layer(
-                initial_hidden_states, attention_mask, self.memory_graph, query_vector
-            )
-            num_injected_nodes = modified_hidden_states.shape[1] - initial_hidden_states.shape[1]
-            if num_injected_nodes > 0:
-                print(f"Injecting {num_injected_nodes} memory node(s) into the prompt.", file=sys.stdout)
-            else:
-                print("No memory nodes injected for this turn.", file=sys.stdout)
-            
-            # --- Memory Capture (updating stateful inference graph) ---
-            self._update_memory(initial_hidden_states.detach())
-
-            # --- 2. Delegate to the Original `generate` Method with Modified Inputs ---
-            if 'attention_mask' in kwargs:
-                del kwargs['attention_mask']
-            return super().generate(
-                input_ids=None,
-                inputs_embeds=modified_hidden_states,
-                attention_mask=modified_attention_mask,
-                **kwargs
-            )
-
-        return super().generate(input_ids=input_ids, **kwargs)
-
-    def _update_memory(self, prompt_hidden_state):
-        print(f"Updating memory...", file=sys.stdout)
-        turn_summary_vector = torch.mean(prompt_hidden_state, dim=1)
-        existing_nodes = self.memory_graph.x
-        num_existing_nodes = existing_nodes.shape[0]
-        new_nodes = torch.cat([existing_nodes, turn_summary_vector], dim=0)
+        print("GemmaWithMemory: Pre-computation for memory operations.", file=sys.stdout)
         
-        if num_existing_nodes > 0:
-            prev_node_idx = num_existing_nodes - 1
-            new_node_idx = num_existing_nodes
-            new_edge = torch.tensor([[prev_node_idx], [new_node_idx]], dtype=torch.long)
-            new_edge_index = torch.cat([self.memory_graph.edge_index, new_edge], dim=1)
-        else:
-            new_edge_index = self.memory_graph.edge_index
-            
-        self.memory_graph.x = new_nodes
-        self.memory_graph.edge_index = new_edge_index
-        print(f"Added new node. Graph now has {self.memory_graph.num_nodes} nodes.", file=sys.stderr)
+        # --- 1. Inject retrieved memory to create a new set of input_ids ---
+        # The injection layer now returns a full sequence of input_ids
+        modified_input_ids, modified_attention_mask = self.injection_layer(
+            input_ids, kwargs.get("attention_mask", torch.ones_like(input_ids))
+        )
+        
+        # Remove 'attention_mask' from kwargs to avoid passing it twice
+        kwargs.pop("attention_mask", None)
+        # --- 2. Delegate to the Original `generate` Method ---
+        # We use the new, memory-infused input_ids to generate a response
+        generated_outputs = super().generate(
+            input_ids=modified_input_ids,
+            attention_mask=modified_attention_mask,
+            **kwargs
+        )
+
+        # --- 3. Update memory AFTER generation is complete ---
+        # We store the original prompt (before injection) as a memory.
+        self._update_memory(input_ids)
+
+        return generated_outputs
+
+    def _update_memory(self, original_input_ids):
+        """
+        Stores the summary vector and original input_ids for a given turn.
+        """
+        print(f"Updating memory...", file=sys.stdout)
+        with torch.no_grad():
+            # Create the raw summary vector
+            prompt_hidden_state = self.model.embed_tokens(original_input_ids)
+            turn_summary_vector = torch.mean(prompt_hidden_state, dim=1)
+
+        # Store the vector and the original input_ids in the memory list
+        self.memory_graph.append({
+            "vector": turn_summary_vector.cpu(), # Store on CPU to save GPU memory
+            "input_ids": original_input_ids.cpu()
+        })
+        print(f"Added new node. Graph now has {len(self.memory_graph)} nodes.", file=sys.stderr)

@@ -32,7 +32,7 @@ else:
 
 # --- Turn 2: Force retrieval from memory to generate an answer, don't expect it to be smart, just look for the logs in the query vector ---
 print("--- Turn 2 ---")
-prompt2_text = "<start_of_turn>user\nMy name is Juan.<end_of_turn>\n<start_of_turn>model\n"
+prompt2_text = "<start_of_turn>user\nMy name is Federico.<end_of_turn>\n<start_of_turn>model\n"
 inputs2 = model.tokenizer(prompt2_text, return_tensors="pt")
 
 # NOTE: We are ONLY passing the second prompt's inputs.
@@ -56,7 +56,7 @@ else:
 
 # --- Turn 3: Force retrieval from memory to generate another answer, the logs in the query vector should indicate a split memory attention across the nodoes---
 print("--- Turn 3 ---")
-prompt2_text = "<start_of_turn>user\nMy name is Alfred.<end_of_turn>\n<start_of_turn>model\n"
+prompt2_text = "<start_of_turn>user\nMy name is Federico.<end_of_turn>\n<start_of_turn>model\n"
 inputs2 = model.tokenizer(prompt2_text, return_tensors="pt")
 
 # NOTE: We are ONLY passing the second prompt's inputs.
@@ -80,7 +80,7 @@ else:
 
 # --- Turn 4: Force retrieval from memory to generate another answer, the logs in the query vector should indicate a split memory attention across the nodes---
 print("--- Turn 4 ---")
-prompt2_text = "<start_of_turn>user\nMy name is Nori.<end_of_turn>\n<start_of_turn>model\n"
+prompt2_text = "<start_of_turn>user\nWhat is my name?.<end_of_turn>\n<start_of_turn>model\n"
 inputs2 = model.tokenizer(prompt2_text, return_tensors="pt")
 
 # NOTE: We are ONLY passing the second prompt's inputs.
