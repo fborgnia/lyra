@@ -25,6 +25,10 @@ class EpisodicMemoryGNN(nn.Module):
         # Get all memory nodes from the graph
         memory_nodes = memory_graph.x
         
+        # Handle the edge case of an empty memory graph to prevent NaN gradients.
+        if memory_nodes.shape[0] == 0:
+            return torch.zeros_like(query_vector)
+
         # Calculate similarity scores (dot-product attention)
         # query_vector: [1, 1152], memory_nodes.t(): [1152, num_nodes]
         # scores: [1, num_nodes]
