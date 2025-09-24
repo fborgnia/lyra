@@ -13,7 +13,7 @@ class GemmaWithMemory(Gemma3ForCausalLM):
     an episodic memory graph. It overrides the `generate` method for inference and
     the `forward` method for training the GNN with a triplet loss.
     """
-    def __init__(self, model_path='./models/gemma-3-1b-it', gnn_weights_path='.models/gnn_semantic_alignment.pth'):
+    def __init__(self, model_path='./models/gemma-3-1b-it', gnn_weights_path='./models/gnn_semantic_alignment.pth'):
         # 1. Load the pretrained Gemma3ForCausalLM model and tokenizer
         base_model = Gemma3ForCausalLM.from_pretrained(model_path, attn_implementation="eager")
         super().__init__(base_model.config)
@@ -32,8 +32,16 @@ class GemmaWithMemory(Gemma3ForCausalLM):
             param.requires_grad = False
 
         # 3. Initialize GNN and load trained weights
-        self.gnn = EpisodicMemoryGNN(self)
-        self.injection_layer = MemoryInjectionLayer(self)
+        
+        self.gnn = EpisodicMemoryGNN(self.config, self.model.embed_tokens)
+        gnn_weights_file = Path(gnn_weights_path)
+        if gnn_weights_file.is_file():
+            print(f"Loading trained GNN weights from {gnn_weights_path}", file=sys.stderr)
+            self.gnn.load_state_dict(torch.load(gnn_weights_path))
+        else:
+            print(f"Warning: No trained GNN weights found at {gnn_weights_path}. GNN is using initial weights.", file=sys.stderr)
+
+        self.injection_layer = MemoryInjectionLayer()
 
         # 5. Initialize an enhanced memory structure
         self.memory_graph = []
@@ -81,9 +89,13 @@ class GemmaWithMemory(Gemma3ForCausalLM):
         print("GemmaWithMemory: Pre-computation for memory operations.", file=sys.stdout)
         
         # --- 1. Inject retrieved memory to create a new set of input_ids ---
-        # The injection layer now returns a full sequence of input_ids
+        # Pass the necessary components to the stateless injection layer
         modified_input_ids, modified_attention_mask = self.injection_layer(
-            input_ids, kwargs.get("attention_mask", torch.ones_like(input_ids))
+            self.gnn,
+            self.memory_graph,
+            self.tokenizer,
+            input_ids,
+            kwargs.get("attention_mask", torch.ones_like(input_ids))
         )
         
         # Remove 'attention_mask' from kwargs to avoid passing it twice
@@ -113,8 +125,11 @@ class GemmaWithMemory(Gemma3ForCausalLM):
             turn_summary_vector = torch.mean(prompt_hidden_state, dim=1)
 
         # Store the vector and the original input_ids in the memory list
+        projected_vector = self.gnn.query_projection(turn_summary_vector)
+
+        # Store the PROJECTED vector and the original input_ids in the memory list
         self.memory_graph.append({
-            "vector": turn_summary_vector.cpu(), # Store on CPU to save GPU memory
+            "vector": projected_vector.cpu(), # Store on CPU to save GPU memory
             "input_ids": original_input_ids.cpu()
         })
         print(f"Added new node. Graph now has {len(self.memory_graph)} nodes.", file=sys.stderr)
