@@ -10,7 +10,7 @@ model = GemmaWithMemory()
 
 # --- Turn 1: Create the memory ---
 # This turn's information will be stored in the memory graph, but NOT passed in the next prompt.
-print("--- Turn 1: Storing memory ---")
+print("--- Turn 1 ---")
 prompt1 = "<start_of_turn>user\nMy name is Federico.<end_of_turn>\n<start_of_turn>model\n"
 inputs1 = model.tokenizer(prompt1, return_tensors="pt")
 
@@ -31,7 +31,7 @@ else:
 
 
 # --- Turn 2: Force retrieval from memory to generate an answer ---
-print("--- Turn 2: Retrieving memory to answer question ---")
+print("--- Turn 2 ---")
 prompt2_text = "<start_of_turn>user\nMy name is Juan.<end_of_turn>\n<start_of_turn>model\n"
 inputs2 = model.tokenizer(prompt2_text, return_tensors="pt")
 
