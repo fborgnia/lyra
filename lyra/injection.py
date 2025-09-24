@@ -17,7 +17,7 @@ class MemoryInjectionLayer(nn.Module):
         """
         # 1. Use the GNN to retrieve the relevant memory context
         # retrieved_memory shape: [batch, hidden_dim]
-        retrieved_memory = self.gnn(query_vector, memory_graph)
+        retrieved_memory = self.gnn(memory_graph, query_vector)
         
         print("Injecting retrieved memory into the model.", file=sys.stdout)
         

@@ -31,7 +31,7 @@ class GemmaWithMemory(Gemma3ForCausalLM):
             param.requires_grad = False
 
         # 4. Initialize GNN, Injection Layer, and an empty memory graph for INFERENCE
-        self.gnn = EpisodicMemoryGNN()
+        self.gnn = EpisodicMemoryGNN(embedding_dim=self.config.hidden_size)
         self.injection_layer = MemoryInjectionLayer(self.gnn)
         hidden_size = self.config.hidden_size
         self.memory_graph = Data(x=torch.empty((0, hidden_size)))

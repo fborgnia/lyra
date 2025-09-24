@@ -2,46 +2,42 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch_geometric.data import Data
 import sys
 
 class EpisodicMemoryGNN(nn.Module):
-    def __init__(self):
+    def __init__(self, embedding_dim):
         super().__init__()
-        # In a more complex GNN, we would have layers here.
-        # For now, it's a simple attention-based retrieval.
-        pass
+        # This is the trainable component. It's a standard linear layer that will
+        # learn to project the query vector into a more effective search space.
+        self.query_projection = nn.Linear(embedding_dim, embedding_dim)
 
-    def forward(self, query_vector, memory_graph):
+    def forward(self, memory_graph, query_vector):
         """
-        Performs attention-based retrieval of memory nodes.
-        
+        Performs a single pass of attention over the memory graph.
+
         Args:
-            query_vector (Tensor): Shape [batch_size, hidden_dim]
-            memory_graph (Data): The graph containing memory nodes.
+            memory_graph (torch_geometric.data.Data): The current memory graph.
+            query_vector (torch.Tensor): The query vector from the current prompt.
 
         Returns:
-            Tensor: The retrieved memory context vector, shape [batch_size, hidden_dim]
+            torch.Tensor: The context vector (retrieved memory).
         """
-        # Get all memory nodes from the graph
         memory_nodes = memory_graph.x
         
-        # Handle the edge case of an empty memory graph to prevent NaN gradients.
         if memory_nodes.shape[0] == 0:
             return torch.zeros_like(query_vector)
 
-        # Calculate similarity scores (dot-product attention)
-        # query_vector: [1, 1152], memory_nodes.t(): [1152, num_nodes]
-        # scores: [1, num_nodes]
-        scores = torch.matmul(query_vector, memory_nodes.t())
+        # 1. Apply the trainable projection to the incoming query vector.
+        projected_query = self.query_projection(query_vector)
+
+        # 2. Calculate similarity scores using the *projected* query.
+        attention_scores = torch.matmul(projected_query, memory_nodes.t())
+        attention_weights = F.softmax(attention_scores, dim=-1)
         
-        # Apply softmax to get attention weights
-        attention_weights = F.softmax(scores, dim=-1)
-        
-        print(f"GNN Attention Weights: {attention_weights.detach().cpu().numpy()}", file=sys.stderr)
-        
-        # Create context vector as a weighted sum of memories
-        # attention_weights: [1, num_nodes], memory_nodes: [num_nodes, 1152]
-        # context_vector: [1, 1152]
+        print(f"GNN Attention Weights: {attention_weights.tolist()}", file=sys.stdout)
+
+        # 3. Compute the context vector as a weighted sum of the original memories.
         context_vector = torch.matmul(attention_weights, memory_nodes)
-        
+
         return context_vector
