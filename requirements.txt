@@ -3,4 +3,5 @@ torch
 torch_geometric
 accelerate
 pytest
+faker
 # Add other dependencies as needed
