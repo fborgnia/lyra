@@ -76,3 +76,27 @@ if model.memory_graph:
     print(f"Memory graph has {model.memory_graph.num_nodes} nodes after turn 3.")
 else:
     print("Memory graph is empty after turn 3.")
+
+
+# --- Turn 4: Force retrieval from memory to generate another answer, the logs in the query vector should indicate a split memory attention across the nodes---
+print("--- Turn 4 ---")
+prompt2_text = "<start_of_turn>user\nMy name is Nori.<end_of_turn>\n<start_of_turn>model\n"
+inputs2 = model.tokenizer(prompt2_text, return_tensors="pt")
+
+# NOTE: We are ONLY passing the second prompt's inputs.
+# The model cannot see the context from Turn 1 in its input_ids.
+# It MUST use the memory graph to answer correctly.
+outputs2 = model.generate(
+    input_ids=inputs2["input_ids"],
+    attention_mask=inputs2["attention_mask"],
+    max_new_tokens=150,
+    eos_token_id=model.end_of_turn_token_id
+)
+full_text2 = model.tokenizer.decode(outputs2[0], skip_special_tokens=False)
+print(f"\n--- Model Output (Turn 4) ---\n{full_text2}\n--------------------")
+
+# --- Check memory graph again ---
+if model.memory_graph:
+    print(f"Memory graph has {model.memory_graph.num_nodes} nodes after turn 4.")
+else:
+    print("Memory graph is empty after turn 4.")

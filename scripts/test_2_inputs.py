@@ -32,7 +32,7 @@ else:
 
 # --- Turn 2: Force retrieval from memory to generate an answer ---
 print("--- Turn 2 ---")
-prompt2_text = "<start_of_turn>user\nMy name is Juan.<end_of_turn>\n<start_of_turn>model\n"
+prompt2_text = "<start_of_turn>user\nWhat is my name?.<end_of_turn>\n<start_of_turn>model\n"
 inputs2 = model.tokenizer(prompt2_text, return_tensors="pt")
 
 # NOTE: We are ONLY passing the second prompt's inputs.
