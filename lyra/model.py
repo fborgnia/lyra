@@ -102,11 +102,11 @@ class Lyra(Gemma3ForCausalLM):
 
         # --- 3. Update memory AFTER generation is complete ---
         # We store the original prompt (before injection) as a memory.
-        self._update_memory(input_ids)
+        self._update_memory(input_ids, generated_outputs)
 
         return generated_outputs
 
-    def _update_memory(self, original_input_ids):
+    def _update_memory(self, original_input_ids, generated_outputs):
         """
         Stores the summary vector and original input_ids for a given turn.
         """
@@ -121,7 +121,8 @@ class Lyra(Gemma3ForCausalLM):
 
         # Store the PROJECTED vector and the original input_ids in the memory list
         self.memory_buffer.append({
-            "vector": projected_vector.cpu(), # Store on CPU to save GPU memory
-            "input_ids": original_input_ids.cpu()
+            "vector": projected_vector.cpu(),
+            "input_ids": original_input_ids.cpu(),
+            "output_ids": generated_outputs.cpu()
         })
-        print(f"Added new node. Graph now has {len(self.memory_buffer)} nodes.", file=sys.stderr)
+        print(f"Added new node. Buffer now has {len(self.memory_buffer)} nodes.", file=sys.stderr)
