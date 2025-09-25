@@ -102,7 +102,12 @@ class Lyra(Gemma3ForCausalLM):
 
         # --- 3. Update memory AFTER generation is complete ---
         # We store the original prompt (before injection) as a memory.
-        self._update_memory(input_ids, generated_outputs)
+        prompt_length = modified_input_ids.shape[1]
+        response_only_ids = generated_outputs[:, prompt_length:]
+
+        # --- 3. Update memory AFTER generation is complete ---
+        # We store the original prompt and the ISOLATED response.
+        self._update_memory(input_ids, response_only_ids)
 
         return generated_outputs
 
