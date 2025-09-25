@@ -6,8 +6,6 @@ Lyra is an experimental language model that enhances a standard Gemma instructio
 
 The core of the project is the `Lyra` model, which subclasses `transformers.Gemma3ForCausalLM`. It integrates a small, trainable `Retriever` module that acts as a semantic search engine over the conversational history.
 
-The system's key innovation is its **text-based memory injection**. Instead of injecting abstract memory vectors, Lyra reconstructs a coherent, multi-turn chat history that the base Gemma model can natively understand.
-
 ### Key Components:
 
 -   **`lyra/model.py` (`Lyra`)**: The main model class. It orchestrates the entire memory process, overriding the `generate()` method to intercept user prompts and manage the memory workflow.
