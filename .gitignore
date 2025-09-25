@@ -15,3 +15,11 @@ env/
 # IDE specific
 .vscode/
 .idea/
+
+# Copilot
+.github/
+
+#Runtime files
+data/
+base_model/
+models/
