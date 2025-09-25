@@ -25,7 +25,7 @@ print(f"\n--- Model Output (Turn 1) ---\n{full_text}\n--------------------\n")
 # --- Turn 1b: Create the memory that replaces the previous memory ---
 # This turn's information will be stored in the memory graph, but NOT passed in the next prompt.
 print("--- Turn 1b: Storing memory ---")
-prompt = "<start_of_turn>user\nFederico red keyring was lost, and he got a black keyring.<end_of_turn>\n<start_of_turn>model\n"
+prompt = "<start_of_turn>user\nFederico keyring was lost, and he replaced it with a black keyring that he prefers more.<end_of_turn>\n<start_of_turn>model\n"
 inputs = model.tokenizer(prompt, return_tensors="pt")
 
 outputs = model.generate(

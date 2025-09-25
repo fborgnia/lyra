@@ -17,14 +17,18 @@ class SemanticRetriever(nn.Module):
         embedding_dim = self.config.hidden_size
         self.query_projection = nn.Linear(embedding_dim, embedding_dim)
 
-    def forward(self, memory_buffer, query_input_ids):
+    def forward(self, memory_buffer, query_input_ids, top_k: int = 1):
         """
-        Finds the index of the most relevant memory node from the memory graph list.
+        Finds the indices of the top_k most relevant memory nodes from the memory graph list.
         """
         memory_vectors = [item["vector"] for item in memory_buffer]
 
         if not memory_vectors:
-            return -1
+            return []
+
+        # Handle the edge case where the number of memories is less than top_k.
+        num_memories = len(memory_vectors)
+        actual_k = min(top_k, num_memories)
 
         # The device should be inferred from the parameters, not from the model object.
         device = self.query_projection.weight.device
@@ -43,8 +47,16 @@ class SemanticRetriever(nn.Module):
         attention_scores = torch.matmul(projected_query, projected_memory_nodes.t())
         print(f"Retriever Attention Scores: {attention_scores.tolist()}", file=sys.stdout)
 
-        # Find the index of the memory with the highest score.
-        best_memory_index = torch.argmax(attention_scores, dim=-1).item()
-        print(f"Retriever chose memory index: {best_memory_index}", file=sys.stdout)
+        # Find the indices of the memories with the highest scores.
+        _, top_k_indices = torch.topk(attention_scores, k=actual_k, dim=-1)
+        
+        # Convert to a list of integers
+        best_memory_indices = top_k_indices.squeeze().tolist()
 
-        return best_memory_index
+        # Ensure it's always a list
+        if not isinstance(best_memory_indices, list):
+            best_memory_indices = [best_memory_indices]
+
+        print(f"Retriever chose memory indices: {best_memory_indices}", file=sys.stdout)
+
+        return best_memory_indices

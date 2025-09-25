@@ -70,7 +70,7 @@ class Lyra(Gemma3ForCausalLM):
         # --- Case 2: Inference Path ---
         return super().forward(**kwargs)
 
-    def generate(self, input_ids, **kwargs):
+    def generate(self, input_ids, num_retrieved_memories: int = 3, **kwargs):
         """
         Overrides the main generate method for INFERENCE.
         Injects text-based memory before calling the base model's generate method.
@@ -83,11 +83,12 @@ class Lyra(Gemma3ForCausalLM):
         # --- 1. Inject retrieved memory to create a new set of input_ids ---
         # Pass the necessary components to the stateless injection layer
         modified_input_ids, modified_attention_mask = self.injection_layer(
-            self.retriever,
-            self.memory_buffer,
-            self.tokenizer,
-            input_ids,
-            kwargs.get("attention_mask", torch.ones_like(input_ids))
+            retriever=self.retriever,
+            memory_buffer=self.memory_buffer,
+            tokenizer=self.tokenizer,
+            current_input_ids=input_ids,
+            current_attention_mask=kwargs.get("attention_mask", torch.ones_like(input_ids)),
+            top_k=num_retrieved_memories
         )
         
         # Remove 'attention_mask' from kwargs to avoid passing it twice
