@@ -4,7 +4,7 @@ import torch.nn as nn
 from transformers import Gemma3ForCausalLM, AutoTokenizer
 from pathlib import Path
 
-from .gnn import EpisodicMemoryGNN
+from .memory import EpisodicBuffer
 from .injection import MemoryInjectionLayer
 
 class Lyra(Gemma3ForCausalLM):
@@ -13,7 +13,7 @@ class Lyra(Gemma3ForCausalLM):
     an episodic memory graph. It overrides the `generate` method for inference and
     the `forward` method for training the GNN with a triplet loss.
     """
-    def __init__(self, model_path='./models/gemma-3-1b-it', gnn_weights_path='./models/gnn_semantic_alignment.pth'):
+    def __init__(self, model_path='./models/gemma-3-1b-it', sr_weights_path='./models/semantic_retriever.pth'):
         # 1. Load the pretrained Gemma3ForCausalLM model and tokenizer
         base_model = Gemma3ForCausalLM.from_pretrained(model_path, attn_implementation="eager")
         super().__init__(base_model.config)
@@ -25,13 +25,13 @@ class Lyra(Gemma3ForCausalLM):
             param.requires_grad = False
 
         # 3. Initialize GNN and load trained weights
-        self.gnn = EpisodicMemoryGNN(self.config, self.model.embed_tokens)
-        gnn_weights_file = Path(gnn_weights_path)
+        self.gnn = EpisodicBuffer(self.config, self.model.embed_tokens)
+        gnn_weights_file = Path(sr_weights_path)
         if gnn_weights_file.is_file():
-            print(f"Loading trained GNN weights from {gnn_weights_path}", file=sys.stderr)
-            self.gnn.load_state_dict(torch.load(gnn_weights_path))
+            print(f"Loading trained GNN weights from {sr_weights_path}", file=sys.stderr)
+            self.gnn.load_state_dict(torch.load(sr_weights_path))
         else:
-            print(f"Warning: No trained GNN weights found at {gnn_weights_path}. GNN is using initial weights.", file=sys.stderr)
+            print(f"Warning: No trained GNN weights found at {sr_weights_path}. GNN is using initial weights.", file=sys.stderr)
 
         self.injection_layer = MemoryInjectionLayer()
 

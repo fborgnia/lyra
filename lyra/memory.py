@@ -3,7 +3,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-class EpisodicMemoryGNN(nn.Module):
+class EpisodicBuffer(nn.Module):
     """
     A Graph Neural Network module responsible for finding the most relevant memory.
     """

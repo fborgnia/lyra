@@ -84,10 +84,10 @@ def main():
     print("Training finished.")
 
     # --- 7. Save the trained GNN weights ---
-    gnn_weights_path = Path(__file__).parent.parent / "models" / "gnn_semantic_alignment.pth"
-    gnn_weights_path.parent.mkdir(exist_ok=True)
-    torch.save(model.gnn.state_dict(), gnn_weights_path)
-    print(f"GNN weights saved to {gnn_weights_path}")
+    sr_weights_path = Path(__file__).parent.parent / "models" / "semantic_retriever.pth"
+    sr_weights_path.parent.mkdir(exist_ok=True)
+    torch.save(model.gnn.state_dict(), sr_weights_path)
+    print(f"GNN weights saved to {sr_weights_path}")
 
 if __name__ == "__main__":
     main()
