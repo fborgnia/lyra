@@ -18,21 +18,13 @@ class GemmaWithMemory(Gemma3ForCausalLM):
         base_model = Gemma3ForCausalLM.from_pretrained(model_path, attn_implementation="eager")
         super().__init__(base_model.config)
         self.load_state_dict(base_model.state_dict())
-        
         self.tokenizer = AutoTokenizer.from_pretrained(model_path)
-        
-        # Define special tokens for chat templating
-        self.sot_token_id = self.tokenizer.encode('<start_of_turn>', add_special_tokens=False)[0]
-        self.eot_token_id = self.tokenizer.encode('<end_of_turn>', add_special_tokens=False)[0]
-        self.user_token_id = self.tokenizer.encode('user\n', add_special_tokens=False)[0]
-        self.model_token_id = self.tokenizer.encode('model\n', add_special_tokens=False)[0]
 
         # 2. Freeze the base model parameters
         for param in self.parameters():
             param.requires_grad = False
 
         # 3. Initialize GNN and load trained weights
-        
         self.gnn = EpisodicMemoryGNN(self.config, self.model.embed_tokens)
         gnn_weights_file = Path(gnn_weights_path)
         if gnn_weights_file.is_file():
