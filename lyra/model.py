@@ -4,14 +4,14 @@ import torch.nn as nn
 from transformers import Gemma3ForCausalLM, AutoTokenizer
 from pathlib import Path
 
-from .memory import EpisodicBuffer
+from .retriever import SemanticRetriever
 from .injection import MemoryInjectionLayer
 
 class Lyra(Gemma3ForCausalLM):
     """
     A self-contained Gemma model that inherits from Gemma3ForCausalLM and integrates
-    an episodic memory graph. It overrides the `generate` method for inference and
-    the `forward` method for training the GNN with a triplet loss.
+    an episodic memory buffer. It overrides the `generate` method for inference and
+    the `forward` method for training the Retriever with a triplet loss.
     """
     def __init__(self, model_path='./models/gemma-3-1b-it', sr_weights_path='./models/semantic_retriever.pth'):
         # 1. Load the pretrained Gemma3ForCausalLM model and tokenizer
@@ -24,22 +24,22 @@ class Lyra(Gemma3ForCausalLM):
         for param in self.parameters():
             param.requires_grad = False
 
-        # 3. Initialize GNN and load trained weights
-        self.gnn = EpisodicBuffer(self.config, self.model.embed_tokens)
-        gnn_weights_file = Path(sr_weights_path)
-        if gnn_weights_file.is_file():
-            print(f"Loading trained GNN weights from {sr_weights_path}", file=sys.stderr)
-            self.gnn.load_state_dict(torch.load(sr_weights_path))
+        # 3. Initialize Retriever and load trained weights
+        self.retriever = SemanticRetriever(self.config, self.model.embed_tokens)
+        sr_weights_file = Path(sr_weights_path)
+        if sr_weights_file.is_file():
+            print(f"Loading trained Retriever weights from {sr_weights_path}", file=sys.stderr)
+            self.retriever.load_state_dict(torch.load(sr_weights_path))
         else:
-            print(f"Warning: No trained GNN weights found at {sr_weights_path}. GNN is using initial weights.", file=sys.stderr)
+            print(f"Warning: No trained Retriever weights found at {sr_weights_path}. Retriever is using initial weights.", file=sys.stderr)
 
         self.injection_layer = MemoryInjectionLayer()
 
         # 5. Initialize an enhanced memory structure
-        self.memory_graph = []
-        print("Initialized empty memory graph.", file=sys.stderr)
+        self.memory_buffer = []
+        print("Initialized empty memory buffer.", file=sys.stderr)
 
-        # 6. Define the loss function for GNN training
+        # 6. Define the loss function for Retriever training
         self.triplet_loss = nn.TripletMarginLoss(margin=1.0, p=2)
 
     def forward(self, context_input_ids=None, query_input_ids=None, **kwargs):
@@ -54,8 +54,8 @@ class Lyra(Gemma3ForCausalLM):
                 context_vectors = torch.mean(context_embeddings, dim=1)
                 query_vectors = torch.mean(query_embeddings, dim=1)
 
-            anchor = self.gnn.query_projection(query_vectors)
-            positive = self.gnn.query_projection(context_vectors)
+            anchor = self.retriever.query_projection(query_vectors)
+            positive = self.retriever.query_projection(context_vectors)
 
             batch_size = anchor.shape[0]
             if batch_size < 2:
@@ -83,8 +83,8 @@ class Lyra(Gemma3ForCausalLM):
         # --- 1. Inject retrieved memory to create a new set of input_ids ---
         # Pass the necessary components to the stateless injection layer
         modified_input_ids, modified_attention_mask = self.injection_layer(
-            self.gnn,
-            self.memory_graph,
+            self.retriever,
+            self.memory_buffer,
             self.tokenizer,
             input_ids,
             kwargs.get("attention_mask", torch.ones_like(input_ids))
@@ -117,11 +117,11 @@ class Lyra(Gemma3ForCausalLM):
             turn_summary_vector = torch.mean(prompt_hidden_state, dim=1)
 
         # Store the vector and the original input_ids in the memory list
-        projected_vector = self.gnn.query_projection(turn_summary_vector)
+        projected_vector = self.retriever.query_projection(turn_summary_vector)
 
         # Store the PROJECTED vector and the original input_ids in the memory list
-        self.memory_graph.append({
+        self.memory_buffer.append({
             "vector": projected_vector.cpu(), # Store on CPU to save GPU memory
             "input_ids": original_input_ids.cpu()
         })
-        print(f"Added new node. Graph now has {len(self.memory_graph)} nodes.", file=sys.stderr)
+        print(f"Added new node. Graph now has {len(self.memory_buffer)} nodes.", file=sys.stderr)
