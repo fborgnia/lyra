@@ -7,7 +7,7 @@ from pathlib import Path
 from .gnn import EpisodicMemoryGNN
 from .injection import MemoryInjectionLayer
 
-class GemmaWithMemory(Gemma3ForCausalLM):
+class Lyra(Gemma3ForCausalLM):
     """
     A self-contained Gemma model that inherits from Gemma3ForCausalLM and integrates
     an episodic memory graph. It overrides the `generate` method for inference and
@@ -78,7 +78,7 @@ class GemmaWithMemory(Gemma3ForCausalLM):
         if input_ids is None:
             return super().generate(**kwargs)
 
-        print("GemmaWithMemory: Pre-computation for memory operations.", file=sys.stdout)
+        print("Lyra: Pre-computation for memory operations.", file=sys.stdout)
         
         # --- 1. Inject retrieved memory to create a new set of input_ids ---
         # Pass the necessary components to the stateless injection layer
