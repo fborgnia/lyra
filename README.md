@@ -2,7 +2,7 @@
 
 Lyra enhances a standard Gemma instruction-tuned model with an internal episodic memory cache. This allows the model to maintain a persistent, structured memory of conversations, enabling it to recall past information and provide context-aware responses without any external prompt management.
 
-Lyra treat the first conversational turn as a **persistent instruction context**. This initial prompt sets the persona and objective for the entire session, ensuring the model's behavior remains consistent while subsequent turns are stored as retrievable episodic memories.
+Lyra treats the first conversational turn as a **persistent instruction context**. This initial prompt sets the persona and objective for the entire session, ensuring the model's behavior remains consistent while subsequent turns are stored as retrievable episodic memories.
 
 ## Architecture Overview: How It Works
 
