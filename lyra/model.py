@@ -70,7 +70,7 @@ class Lyra(Gemma3ForCausalLM):
         # --- Case 2: Inference Path ---
         return super().forward(**kwargs)
 
-    def generate(self, input_ids, num_retrieved_memories: int = 3, **kwargs):
+    def generate(self, input_ids, num_retrieved_memories: int = 2, **kwargs):
         """
         Overrides the main generate method for INFERENCE.
         Injects text-based memory before calling the base model's generate method.

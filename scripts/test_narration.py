@@ -11,7 +11,7 @@ model = Lyra()
 # --- Turn 1: Create the memory ---
 # This turn's information will be stored in the memory graph, but NOT passed in the next prompt.
 print("--- Turn 1: Storing memory ---")
-prompt = "<start_of_turn>user\nFederico had a red keyring.<end_of_turn>\n<start_of_turn>model\n"
+prompt = "<start_of_turn>user\nLet me tell you what happend to my wife today, Lorraine woke up early in the morning like any other day.<end_of_turn>\n<start_of_turn>model\n"
 inputs = model.tokenizer(prompt, return_tensors="pt")
 
 outputs = model.generate(
@@ -25,7 +25,7 @@ print(f"\n--- Model Output (Turn 1) ---\n{full_text}\n--------------------\n")
 # --- Turn 1b: Create the memory that replaces the previous memory ---
 # This turn's information will be stored in the memory graph, but NOT passed in the next prompt.
 print("--- Turn 1b: Storing memory ---")
-prompt = "<start_of_turn>user\nFederico keyring was lost, and he replaced it with a black keyring that he prefers more.<end_of_turn>\n<start_of_turn>model\n"
+prompt = "<start_of_turn>user\nShe had a shower and had breakfast like any other day, she went to work.<end_of_turn>\n<start_of_turn>model\n"
 inputs = model.tokenizer(prompt, return_tensors="pt")
 
 outputs = model.generate(
@@ -39,7 +39,7 @@ print(f"\n--- Model Output (Turn 1) ---\n{full_text}\n--------------------\n")
 # --- Turn 2: Create the memory ---
 # This turn's information will be stored in the memory graph, but NOT passed in the next prompt.
 print("--- Turn 2: Storing memory ---")
-prompt = "<start_of_turn>user\nDaniela has a green keyring.<end_of_turn>\n<start_of_turn>model\n"
+prompt = "<start_of_turn>user\nShe did not expect to find the police after her, you are detained please come with us, they said.<end_of_turn>\n<start_of_turn>model\n"
 inputs = model.tokenizer(prompt, return_tensors="pt")
 
 outputs = model.generate(
@@ -53,7 +53,7 @@ print(f"\n--- Model Output (Turn 2) ---\n{full_text}\n--------------------\n")
 # --- Turn 3: Ask a question about a previous turn ---
 # This turn's information will be stored in the memory graph too, but we are evaluating the answer
 print("--- Turn 3: Asking Questions ---")
-prompt = "<start_of_turn>user\nWhat happened to federico's keyring?<end_of_turn>\n<start_of_turn>model\n"
+prompt = "<start_of_turn>user\nWhat happened to lorraine today?<end_of_turn>\n<start_of_turn>model\n"
 inputs = model.tokenizer(prompt, return_tensors="pt")
 
 outputs = model.generate(

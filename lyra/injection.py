@@ -15,16 +15,27 @@ class MemoryInjectionLayer(nn.Module):
             print("No memory to inject.", file=sys.stdout)
             return current_input_ids, current_attention_mask
 
-        best_memory_indices = retriever(memory_buffer, current_input_ids, top_k=top_k)
+        # Implicitly treat the first memory as the instruction context.
+        # It will always be injected.
+        best_memory_indices = [0]
         
-        if not best_memory_indices:
-            return current_input_ids, current_attention_mask
+        # Only search for other relevant memories if there are more than one.
+        if len(memory_buffer) > 1:
+            # Search in the rest of the buffer (excluding the instruction).
+            searchable_memories = memory_buffer[1:]
+            
+            # The retriever returns indices relative to the `searchable_memories` slice.
+            relative_indices = retriever(searchable_memories, current_input_ids, top_k=top_k)
+            
+            # Adjust indices to be absolute (add 1) and append them.
+            # This ensures we don't re-inject the instruction.
+            absolute_indices = [i + 1 for i in relative_indices]
+            best_memory_indices.extend(absolute_indices)
 
-        print(f"Injecting memory indices {best_memory_indices} as text.", file=sys.stdout)
+        print(f"Injecting memory indices {best_memory_indices} as text with top_k {top_k}.", file=sys.stdout)
 
-        # Chronologically sort the indices to reconstruct the conversation order.
-        # This has pros & cons, it ruins the ability to reconstruct a story, but makes it smarter remembering facts.
-        # Gemma has little context, so lost in the middle is a real thing, after 4 turns gemma forgets the middle.
+        # --- 2. Reconstruct the input_ids with injected memory ---
+        # Sort the indices to maintain chronological order in the conversation.    
         best_memory_indices.sort()
 
         device = current_input_ids.device
@@ -54,9 +65,9 @@ class MemoryInjectionLayer(nn.Module):
             if "output_ids" in retrieved_episode:
                 retrieved_model_ids = retrieved_episode["output_ids"].to(device)
                 conversation_history_parts.append(retrieved_model_ids)
-            
+
             # Add a newline after each full turn (user + model)
-            conversation_history_parts.append(newline_tensor)
+            #conversation_history_parts.append(newline_tensor)
 
         # Clean the <bos> token from the current user input
         if current_input_ids[0, 0] == tokenizer.bos_token_id:

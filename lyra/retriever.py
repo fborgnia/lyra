@@ -45,7 +45,7 @@ class SemanticRetriever(nn.Module):
 
         # Calculate similarity scores (dot-product attention) in the projected space.
         attention_scores = torch.matmul(projected_query, projected_memory_nodes.t())
-        print(f"Retriever Attention Scores: {attention_scores.tolist()}", file=sys.stdout)
+        print(f"Retriever Attention Scores: {attention_scores.tolist()}, topk: {actual_k}", file=sys.stdout)
 
         # Find the indices of the memories with the highest scores.
         _, top_k_indices = torch.topk(attention_scores, k=actual_k, dim=-1)
