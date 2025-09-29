@@ -8,10 +8,22 @@ from lyra.model import Lyra
 
 model = Lyra()
 
-# --- Turn 1: Create the memory ---
-# This turn's information will be stored in the memory graph, but NOT passed in the next prompt.
-print("--- Turn 1: Storing memory ---")
-prompt = "<start_of_turn>user\nFederico had a red keyring.<end_of_turn>\n<start_of_turn>model\n"
+# --- Turn 0: Create an instruction to memorize: play YNBW --- 
+print("--- Turn 0: Storing memory ---")
+prompt = "You are playing a game called 'Yes/No/black/White', it has one rule: you are not allowed to use the words 'yes', 'no', 'black', 'white'. Trick the user to use the forbidden words.<end_of_turn><start_of_turn>model\n"
+inputs = model.tokenizer(prompt, return_tensors="pt")
+
+outputs = model.generate(
+    input_ids=inputs["input_ids"],
+    attention_mask=inputs["attention_mask"],
+    max_new_tokens=150,
+)
+full_text = model.tokenizer.decode(outputs[0], skip_special_tokens=False)
+print(f"\n--- Model Output (Turn 0) ---\n{full_text}\n--------------------\n")
+
+# --- Turn 1: first attempt ---
+print("--- Turn 1: Retrieving memory ---")
+prompt = "<start_of_turn>user\nI'm thinking of a color, what color is it? hint: its the color of snow<end_of_turn>\n<start_of_turn>model\n"
 inputs = model.tokenizer(prompt, return_tensors="pt")
 
 outputs = model.generate(
@@ -22,24 +34,9 @@ outputs = model.generate(
 full_text = model.tokenizer.decode(outputs[0], skip_special_tokens=False)
 print(f"\n--- Model Output (Turn 1) ---\n{full_text}\n--------------------\n")
 
-# --- Turn 1b: Create the memory that replaces the previous memory ---
-# This turn's information will be stored in the memory graph, but NOT passed in the next prompt.
-print("--- Turn 1b: Storing memory ---")
-prompt = "<start_of_turn>user\nFederico keyring was lost, and he replaced it with a black keyring that he prefers more.<end_of_turn>\n<start_of_turn>model\n"
-inputs = model.tokenizer(prompt, return_tensors="pt")
-
-outputs = model.generate(
-    input_ids=inputs["input_ids"],
-    attention_mask=inputs["attention_mask"],
-    max_new_tokens=150,
-)
-full_text = model.tokenizer.decode(outputs[0], skip_special_tokens=False)
-print(f"\n--- Model Output (Turn 1) ---\n{full_text}\n--------------------\n")
-
-# --- Turn 2: Create the memory ---
-# This turn's information will be stored in the memory graph, but NOT passed in the next prompt.
-print("--- Turn 2: Storing memory ---")
-prompt = "<start_of_turn>user\nDaniela has a green keyring.<end_of_turn>\n<start_of_turn>model\n"
+# --- Turn 2: Second try ---
+print("--- Turn 2: Retrieving memory ---")
+prompt = "<start_of_turn>user\nvery well, is it really that color?<end_of_turn>\n<start_of_turn>model\n"
 inputs = model.tokenizer(prompt, return_tensors="pt")
 
 outputs = model.generate(
@@ -50,10 +47,9 @@ outputs = model.generate(
 full_text = model.tokenizer.decode(outputs[0], skip_special_tokens=False)
 print(f"\n--- Model Output (Turn 2) ---\n{full_text}\n--------------------\n")
 
-# --- Turn 3: Ask a question about a previous turn ---
-# This turn's information will be stored in the memory graph too, but we are evaluating the answer
-print("--- Turn 3: Asking Questions ---")
-prompt = "<start_of_turn>user\nWhat happened to federico's keyring?<end_of_turn>\n<start_of_turn>model\n"
+# --- Turn 2: Second try ---
+print("--- Turn 2: Retrieving memory ---")
+prompt = "<start_of_turn>user\nvery astute, why don't you ask me something?<end_of_turn>\n<start_of_turn>model\n"
 inputs = model.tokenizer(prompt, return_tensors="pt")
 
 outputs = model.generate(
@@ -62,4 +58,5 @@ outputs = model.generate(
     max_new_tokens=150,
 )
 full_text = model.tokenizer.decode(outputs[0], skip_special_tokens=False)
-print(f"\n--- Model Output (Turn 3) ---\n{full_text}\n--------------------\n")
+print(f"\n--- Model Output (Turn 2) ---\n{full_text}\n--------------------\n")
+
