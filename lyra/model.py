@@ -2,133 +2,184 @@ import sys
 import torch
 import torch.nn as nn
 from transformers import Gemma3ForCausalLM, AutoTokenizer
+from transformers.models.gemma3.modeling_gemma3 import Gemma3DecoderLayer
+from transformers.masking_utils import create_causal_mask
 from pathlib import Path
 
-from .retriever import SemanticRetriever
-from .injection import MemoryInjectionLayer
+from .decoder import LyraDecoderLayer
 
 class Lyra(Gemma3ForCausalLM):
     """
     A self-contained Gemma model that inherits from Gemma3ForCausalLM and integrates
-    an episodic memory buffer. It overrides the `generate` method for inference and
-    the `forward` method for training the Retriever with a triplet loss.
+    an episodic memory buffer. It overrides the `forward` method to inject memory
+    at each layer.
     """
-    def __init__(self, model_path='./models/gemma-3-1b-it', sr_weights_path='./models/semantic_retriever.pth'):
+    def __init__(self, model_path='./models/gemma-3-1b-it', num_memory_layers: int = 4):
         # 1. Load the pretrained Gemma3ForCausalLM model and tokenizer
         base_model = Gemma3ForCausalLM.from_pretrained(model_path, attn_implementation="eager")
         super().__init__(base_model.config)
         self.load_state_dict(base_model.state_dict())
         self.tokenizer = AutoTokenizer.from_pretrained(model_path)
 
-        # 2. Freeze the base model parameters
-        for param in self.parameters():
-            param.requires_grad = False
+        # 2. Replace standard decoder layers with LyraDecoderLayers
+        self.model.layers = nn.ModuleList(
+            [LyraDecoderLayer(self.config, i) if i < num_memory_layers else Gemma3DecoderLayer(self.config, i)
+             for i in range(len(self.model.layers))]
+        )
+        self.num_memory_layers = num_memory_layers
 
-        # 3. Initialize Retriever and load trained weights
-        self.retriever = SemanticRetriever(self.config, self.model.embed_tokens)
-        sr_weights_file = Path(sr_weights_path)
-        if sr_weights_file.is_file():
-            print(f"Loading trained Retriever weights from {sr_weights_path}", file=sys.stderr)
-            self.retriever.load_state_dict(torch.load(sr_weights_path))
-        else:
-            print(f"Warning: No trained Retriever weights found at {sr_weights_path}. Retriever is using initial weights.", file=sys.stderr)
-
-        self.injection_layer = MemoryInjectionLayer()
-
-        # 5. Initialize an enhanced memory structure
+        # 3. Initialize an enhanced memory structure
         self.memory_buffer = []
-        print("Initialized empty memory buffer.", file=sys.stderr)
+        print(f"Initialized Lyra with {num_memory_layers} memory layers and an empty memory buffer.", file=sys.stderr)
 
-        # 6. Define the loss function for Retriever training
-        self.triplet_loss = nn.TripletMarginLoss(margin=1.0, p=2)
 
-    def forward(self, context_input_ids=None, query_input_ids=None, **kwargs):
+    def forward(self, input_ids, attention_mask=None, position_ids=None, past_key_values=None, inputs_embeds=None, labels=None, use_cache=None, output_attentions=None, output_hidden_states=None, return_dict=None, **kwargs):
         """
         The forward pass handles both training and inference calls.
         """
-        # --- Case 1: Training Path ---
-        if context_input_ids is not None and query_input_ids is not None:
-            with torch.no_grad():
-                context_embeddings = self.model.embed_tokens(context_input_ids)
-                query_embeddings = self.model.embed_tokens(query_input_ids)
-                context_vectors = torch.mean(context_embeddings, dim=1)
-                query_vectors = torch.mean(query_embeddings, dim=1)
+        output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
+        output_hidden_states = (
+            output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states
+        )
+        use_cache = use_cache if use_cache is not None else self.config.use_cache
+        return_dict = return_dict if return_dict is not None else self.config.use_return_dict
 
-            anchor = self.retriever.query_projection(query_vectors)
-            positive = self.retriever.query_projection(context_vectors)
+        if inputs_embeds is None:
+            inputs_embeds = self.model.embed_tokens(input_ids)
 
-            batch_size = anchor.shape[0]
-            if batch_size < 2:
-                return {"loss": torch.tensor(0.0, device=self.device, requires_grad=True)} # Cannot compute loss for batch size < 2
+        # The `generate` function does not pass `cache_position`, so we have to create it
+        if "cache_position" not in kwargs:
+            past_seen_tokens = past_key_values.get_seq_length() if past_key_values is not None else 0
+            kwargs["cache_position"] = torch.arange(
+                past_seen_tokens,
+                past_seen_tokens + inputs_embeds.shape[1],
+                device=inputs_embeds.device,
+            )
+        
+        # 4d mask is passed through the layers
+        # Copied from `Gemma3TextModel.forward`
+        causal_attention_mask = create_causal_mask(
+            config=self.config,
+            input_embeds=inputs_embeds,
+            attention_mask=attention_mask,
+            cache_position=kwargs["cache_position"],
+            past_key_values=past_key_values,
+        )
+
+        hidden_states = inputs_embeds * (self.config.hidden_size**0.5)
+        
+        # Pre-compute rotary embeddings
+        position_embeddings_global = self.model.rotary_emb(hidden_states, position_ids=position_ids)
+        position_embeddings_local = self.model.rotary_emb_local(hidden_states, position_ids=position_ids)
+
+        # decoder layers
+        all_hidden_states = () if output_hidden_states else None
+        all_self_attns = () if output_attentions else None
+        next_decoder_cache = None
+        
+        previous_layer_query = None
+
+        for idx, decoder_layer in enumerate(self.model.layers):
+            if output_hidden_states:
+                all_hidden_states += (hidden_states,)
             
-            negative_indices = torch.arange(batch_size, device=self.device).roll(shifts=1, dims=0)
-            negative = positive[negative_indices]
+            if isinstance(decoder_layer, LyraDecoderLayer):
+                layer_outputs = decoder_layer(
+                    hidden_states,
+                    attention_mask=causal_attention_mask,
+                    retriever_attention_mask=attention_mask,
+                    position_ids=position_ids,
+                    past_key_values=past_key_values,
+                    output_attentions=output_attentions,
+                    use_cache=use_cache,
+                    position_embeddings_global=position_embeddings_global,
+                    position_embeddings_local=position_embeddings_local,
+                    memory_buffer=self.memory_buffer,
+                    previous_layer_query=previous_layer_query,
+                    **kwargs,
+                )
+                hidden_states = layer_outputs[0]
+                previous_layer_query = layer_outputs[1]
 
-            loss = self.triplet_loss(anchor, positive, negative)
-            return {"loss": loss}
+            else: # Standard Gemma3DecoderLayer
+                 layer_outputs = decoder_layer(
+                    hidden_states,
+                    attention_mask=causal_attention_mask,
+                    position_ids=position_ids,
+                    past_key_values=past_key_values,
+                    output_attentions=output_attentions,
+                    use_cache=use_cache,
+                    position_embeddings_global=position_embeddings_global,
+                    position_embeddings_local=position_embeddings_local,
+                    **kwargs,
+                )
+                 hidden_states = layer_outputs[0]
 
-        # --- Case 2: Inference Path ---
-        return super().forward(**kwargs)
+            if output_attentions:
+                if isinstance(decoder_layer, LyraDecoderLayer):
+                    all_self_attns += (layer_outputs[2],)
+                else:
+                    all_self_attns += (layer_outputs[1],)
 
-    def generate(self, input_ids, num_retrieved_memories: int = 2, **kwargs):
-        """
-        Overrides the main generate method for INFERENCE.
-        Injects text-based memory before calling the base model's generate method.
-        """
-        if input_ids is None:
-            return super().generate(**kwargs)
-
-        print("Lyra: Pre-computation for memory operations.", file=sys.stdout)
+        hidden_states = self.model.norm(hidden_states)
         
-        # --- 1. Inject retrieved memory to create a new set of input_ids ---
-        # Pass the necessary components to the stateless injection layer
-        modified_input_ids, modified_attention_mask = self.injection_layer(
-            retriever=self.retriever,
-            memory_buffer=self.memory_buffer,
-            tokenizer=self.tokenizer,
-            current_input_ids=input_ids,
-            current_attention_mask=kwargs.get("attention_mask", torch.ones_like(input_ids)),
-            top_k=num_retrieved_memories
-        )
+        if use_cache:
+            next_decoder_cache = past_key_values
+
+        logits = self.lm_head(hidden_states)
         
-        # Remove 'attention_mask' from kwargs to avoid passing it twice
-        kwargs.pop("attention_mask", None)
-        # --- 2. Delegate to the Original `generate` Method ---
-        # We use the new, memory-infused input_ids to generate a response
-        generated_outputs = super().generate(
-            input_ids=modified_input_ids,
-            attention_mask=modified_attention_mask,
-            **kwargs
+        loss = None
+        if labels is not None:
+            # Shift so that tokens < n predict n
+            shift_logits = logits[..., :-1, :].contiguous()
+            shift_labels = labels[..., 1:].contiguous()
+            # Flatten the tokens
+            loss_fct = nn.CrossEntropyLoss()
+            shift_logits = shift_logits.view(-1, self.config.vocab_size)
+            shift_labels = shift_labels.view(-1)
+            # Enable model parallelism
+            shift_labels = shift_labels.to(shift_logits.device)
+            loss = loss_fct(shift_logits, shift_labels)
+
+        from transformers.modeling_outputs import CausalLMOutputWithPast
+        
+        if not return_dict:
+            return (logits,) + (next_decoder_cache,) + all_hidden_states + all_self_attns
+
+        return CausalLMOutputWithPast(
+            loss=loss,
+            logits=logits,
+            past_key_values=next_decoder_cache,
+            hidden_states=all_hidden_states,
+            attentions=all_self_attns,
         )
 
-        # --- 3. Update memory AFTER generation is complete ---
-        # We store the original prompt (before injection) as a memory.
-        prompt_length = modified_input_ids.shape[1]
-        response_only_ids = generated_outputs[:, prompt_length:]
 
-        # --- 3. Update memory AFTER generation is complete ---
-        # We store the original prompt and the ISOLATED response.
-        self._update_memory(input_ids, response_only_ids)
-
-        return generated_outputs
-
-    def _update_memory(self, original_input_ids, generated_outputs):
+    def _update_memory(self, input_ids, attention_mask):
         """
-        Stores the summary vector and original input_ids for a given turn.
+        Stores the final hidden state and attention mask for a given turn.
         """
         print(f"Updating memory...", file=sys.stdout)
         with torch.no_grad():
-            # Create the raw summary vector
-            prompt_hidden_state = self.model.embed_tokens(original_input_ids)
-            turn_summary_vector = torch.mean(prompt_hidden_state, dim=1)
+            # Create position_ids on the fly
+            batch_size, seq_length = input_ids.shape
+            position_ids = torch.arange(0, seq_length, dtype=torch.long, device=input_ids.device)
+            position_ids = position_ids.unsqueeze(0).view(-1, seq_length)
 
-        # Store the vector and the original input_ids in the memory list
-        projected_vector = self.retriever.query_projection(turn_summary_vector)
+            # Perform a forward pass to get the final hidden state
+            # We call the base model's forward pass here, not the overridden one
+            outputs = self.model(
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                position_ids=position_ids,
+                output_hidden_states=True,
+            )
+            # Get the last hidden state from the base model part
+            final_hidden_state = outputs.hidden_states[-1]
 
-        # Store the PROJECTED vector and the original input_ids in the memory list
+        # Store the hidden state and mask in the memory list
         self.memory_buffer.append({
-            "vector": projected_vector.cpu(),
-            "input_ids": original_input_ids.cpu(),
-            "output_ids": generated_outputs.cpu()
+            "hidden_state": final_hidden_state.cpu(),
+            "attention_mask": attention_mask.cpu(),
         })
         print(f"Added new node. Buffer now has {len(self.memory_buffer)} nodes.", file=sys.stderr)

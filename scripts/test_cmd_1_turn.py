@@ -21,17 +21,3 @@ outputs = model.generate(
 )
 full_text = model.tokenizer.decode(outputs[0], skip_special_tokens=False)
 print(f"\n--- Model Output (Turn 0) ---\n{full_text}\n--------------------\n")
-
-# --- Turn 1: Create the memory ---
-# This turn's information will be stored in the memory buffer for retrieval.
-print("--- Turn 1: Storing memory ---")
-prompt = "<start_of_turn>user\nFederico has a red keyring.<end_of_turn>\n<start_of_turn>model\n"
-inputs = model.tokenizer(prompt, return_tensors="pt")
-
-outputs = model.generate(
-    input_ids=inputs["input_ids"],
-    attention_mask=inputs["attention_mask"],
-    max_new_tokens=150,
-)
-full_text = model.tokenizer.decode(outputs[0], skip_special_tokens=False)
-print(f"\n--- Model Output (Turn 1) ---\n{full_text}\n--------------------\n")
