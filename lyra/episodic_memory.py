@@ -16,6 +16,20 @@ class MemoryInjectionBlock(nn.Module):
         print("I'm the memory injection block")
         return hidden_states
 
+class MemoryArchivalBlock(nn.Module):
+    """
+    A dummy memory archival block that prints a message.
+    This block will be responsible for storing memories after a full
+    generation pass.
+    """
+    def __init__(self):
+        super().__init__()
+
+    def forward(self, hidden_states, attention_mask):
+        print("I'm the memory archival block")
+        # In the future, this will store the hidden_states and attention_mask
+        return
+
 class LyraDecoderLayer(Gemma3DecoderLayer):
     """
     This class is a container for the modified `forward` method that includes
