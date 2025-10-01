@@ -10,9 +10,9 @@ class EpisodicMemoryStore:
     def __init__(self):
         self.memories = []
 
-    def add(self, memory: torch.Tensor):
+    def add(self, memory: torch.Tensor, attention_mask: Optional[torch.Tensor]):
         """Adds a new memory to the store."""
-        self.memories.append(memory)
+        self.memories.append((memory, attention_mask))
 
     def retrieve_all(self) -> list:
         """Retrieves all memories from the store."""
@@ -30,9 +30,12 @@ class MemoryInjectionBlock(nn.Module):
         self.memory_store = memory_store
 
     def forward(self, hidden_states, **kwargs):
-        memories = self.memory_store.retrieve_all()
-        if memories:
-            print(f"I'm the memory injection block, accessing {len(memories)} memories.")
+        print("I'm the memory injection block")
+        memories_with_masks = self.memory_store.retrieve_all()
+        if memories_with_masks:
+            print(f"  Retrieved {len(memories_with_masks)} memories.")
+            # Unpack for future use
+            memories, attention_masks = zip(*memories_with_masks)
         # In the future, we will apply the memories to the hidden_states here
         return hidden_states
 
@@ -49,9 +52,15 @@ class MemoryArchivalBlock(nn.Module):
     def forward(self, hidden_states, attention_mask):
         print("\n--- Memory Archival Block ---")
         if hidden_states is not None:
-            print(f"  Archiving hidden state with shape: {hidden_states.shape}")
+            print(f"  Hidden state shape: {hidden_states.shape}")
+            print(f"  Hidden state dtype: {hidden_states.dtype}")
+            print(f"  Hidden state mean: {hidden_states.mean().item():.4f}")
+            print(f"  Hidden state std: {hidden_states.std().item():.4f}")
             # Detach the tensor from the computation graph before storing
-            self.memory_store.add(hidden_states.detach())
+            self.memory_store.add(
+                hidden_states.detach(),
+                attention_mask.detach() if attention_mask is not None else None
+            )
         else:
             print("  Received None for hidden_states, not archiving.")
 
