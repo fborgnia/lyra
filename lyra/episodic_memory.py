@@ -27,7 +27,21 @@ class MemoryArchivalBlock(nn.Module):
         super().__init__()
 
     def forward(self, hidden_states, attention_mask):
-        print("I'm the memory archival block")
+        print("\n--- Memory Archival Block ---")
+        if hidden_states is not None:
+            print(f"  Hidden state shape: {hidden_states.shape}")
+            print(f"  Hidden state dtype: {hidden_states.dtype}")
+            print(f"  Hidden state mean: {hidden_states.mean().item():.4f}")
+            print(f"  Hidden state std: {hidden_states.std().item():.4f}")
+        else:
+            print("  Received None for hidden_states.")
+
+        if attention_mask is not None:
+            print(f"  Attention mask shape: {attention_mask.shape}")
+            print(f"  Attention mask dtype: {attention_mask.dtype}")
+        else:
+            print("  Received None for attention_mask.")
+        print("-----------------------------\n")
         # In the future, this will store the hidden_states and attention_mask
         return
 
