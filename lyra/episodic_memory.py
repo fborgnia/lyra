@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 from transformers.models.gemma3.modeling_gemma3 import Gemma3DecoderLayer, Gemma3Attention, Gemma3MLP
 from typing import Optional, Tuple
+from transformers.cache_utils import Cache
 
 class MemoryInjectionBlock(nn.Module):
     """
@@ -44,7 +45,7 @@ class LyraDecoderLayer(Gemma3DecoderLayer):
         position_embeddings_local: torch.Tensor,
         attention_mask: Optional[torch.Tensor] = None,
         position_ids: Optional[torch.LongTensor] = None,
-        past_key_values: Optional[Tuple[torch.Tensor]] = None,
+        past_key_values: Optional[Cache] = None,
         output_attentions: Optional[bool] = False,
         use_cache: Optional[bool] = False,
         cache_position: Optional[torch.LongTensor] = None,

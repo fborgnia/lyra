@@ -20,12 +20,11 @@ class Lyra(Gemma3ForCausalLM):
         if pretrained_model_name_or_path is None:
             pretrained_model_name_or_path = self.DEFAULT_MODEL_PATH
 
-        # Load config and initialize the model structure
+        # Load config and initialize the model structure from pretrained
         config = AutoConfig.from_pretrained(pretrained_model_name_or_path, **kwargs)
         super().__init__(config)
 
         # Load the pre-trained weights into this model
-        # We create a temporary model to get the state_dict, then load it into self
         temp_model = Gemma3ForCausalLM.from_pretrained(pretrained_model_name_or_path, *model_args, **kwargs)
         self.load_state_dict(temp_model.state_dict())
 
@@ -44,48 +43,44 @@ class Lyra(Gemma3ForCausalLM):
                 # 2. Replace the layer's forward method with our custom one
                 layer.forward = types.MethodType(LyraDecoderLayer.forward, layer)
 
-    def forward(
-        self,
-        input_ids: torch.LongTensor = None,
-        attention_mask: Optional[torch.Tensor] = None,
-        position_ids: Optional[torch.LongTensor] = None,
-        past_key_values: Optional[Tuple[torch.FloatTensor]] = None,
-        inputs_embeds: Optional[torch.FloatTensor] = None,
-        labels: Optional[torch.LongTensor] = None,
-        use_cache: Optional[bool] = None,
-        output_attentions: Optional[bool] = None,
-        output_hidden_states: Optional[bool] = None,
-        return_dict: Optional[bool] = None,
-        **kwargs,
-    ) -> Union[Tuple, CausalLMOutputWithPast]:
+        # Register a forward hook on the final layer norm to capture the last hidden state
+        # This is now handled by the generate wrapper
+        pass
+
+    def generate(self, *args, **kwargs):
+        """
+        Wraps the original generate method to handle memory archival.
+        A forward hook is temporarily registered to capture the final hidden state
+        after the full generation is complete.
+        """
+        handle = None
         
-        # Ensure output_hidden_states is True to get the hidden states
-        # We also need to preserve the original value of output_hidden_states
-        original_output_hidden_states = output_hidden_states
-        output_hidden_states = True
+        # This list will store the last hidden state from the final forward pass
+        last_hidden_state_container = []
 
-        # Call the original forward method
-        outputs = super().forward(
-            input_ids=input_ids,
-            attention_mask=attention_mask,
-            position_ids=position_ids,
-            past_key_values=past_key_values,
-            inputs_embeds=inputs_embeds,
-            labels=labels,
-            use_cache=use_cache,
-            output_attentions=output_attentions,
-            output_hidden_states=output_hidden_states,
-            return_dict=return_dict,
-            **kwargs,
-        )
+        def hook(module, input, output):
+            # The hook will be called for each token generation step.
+            # We only care about the last one, so we just keep overwriting.
+            # The 'input' is a tuple, and the first element is the hidden state tensor.
+            last_hidden_state_container.clear()
+            last_hidden_state_container.append(input[0])
 
-        # After the forward pass, call the memory archival block
-        # The last hidden state is the one before the final layer norm and LM head
-        last_hidden_state = outputs.hidden_states[-1] if return_dict else outputs[2][-1]
-        self.memory_archival_block(last_hidden_state, attention_mask)
+        if hasattr(self, 'model') and hasattr(self.model, 'norm'):
+            handle = self.model.norm.register_forward_hook(hook)
 
-        # If the user did not originally want hidden states, we remove them from the output
-        if not original_output_hidden_states and return_dict:
-            outputs.hidden_states = None
+        try:
+            # Call the original generate method
+            outputs = super().generate(*args, **kwargs)
+        finally:
+            # Always remove the hook afterwards
+            if handle:
+                handle.remove()
+
+        # After generation, perform the memory archival with the captured hidden state
+        if last_hidden_state_container:
+            last_hidden_state = last_hidden_state_container[0]
+            # We need to find the attention mask. A common way is to look for it in kwargs.
+            attention_mask = kwargs.get('attention_mask', None)
+            self.memory_archival_block(last_hidden_state, attention_mask)
         
         return outputs
