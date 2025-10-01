@@ -7,9 +7,7 @@ project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 sys.path.insert(0, project_root)
 from lyra.model import Lyra
 
-model_path = os.path.join(project_root, 'models/gemma-3-1b-it')
 model = Lyra.from_pretrained(
-    model_path,
     dtype=torch.bfloat16,
     attn_implementation="eager"
 )
