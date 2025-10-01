@@ -30,12 +30,14 @@ class MemoryInjectionBlock(nn.Module):
         self.memory_store = memory_store
 
     def forward(self, hidden_states, **kwargs):
-        print("I'm the memory injection block")
         memories_with_masks = self.memory_store.retrieve_all()
-        if memories_with_masks:
-            print(f"  Retrieved {len(memories_with_masks)} memories.")
-            # Unpack for future use
-            memories, attention_masks = zip(*memories_with_masks)
+        if not memories_with_masks:
+            return hidden_states
+
+        print("I'm the memory injection block")
+        print(f"  Retrieved {len(memories_with_masks)} memories.")
+        # Unpack for future use
+        memories, attention_masks = zip(*memories_with_masks)
         # In the future, we will apply the memories to the hidden_states here
         return hidden_states
 
