@@ -2,7 +2,7 @@ import os
 import torch
 import torch.nn as nn
 from transformers import Gemma3ForCausalLM, AutoTokenizer, AutoConfig
-from .episodic_memory import LyraDecoderLayer, MemoryInjectionBlock, MemoryArchivalBlock
+from .episodic_memory import LyraDecoderLayer, MemoryInjectionBlock, MemoryArchivalBlock, EpisodicMemoryStore
 import types
 from typing import Optional, Tuple, Union, Dict, Any
 from transformers.modeling_outputs import CausalLMOutputWithPast
@@ -31,14 +31,17 @@ class Lyra(Gemma3ForCausalLM):
         # Attach the tokenizer
         self.tokenizer = AutoTokenizer.from_pretrained(pretrained_model_name_or_path)
 
+        # Create and share the central memory store
+        self.memory_store = EpisodicMemoryStore()
+
         # Add the memory archival block
-        self.memory_archival_block = MemoryArchivalBlock()
+        self.memory_archival_block = MemoryArchivalBlock(self.memory_store)
 
         # Use a non-destructive, in-place modification of the decoder layers
         if hasattr(self, 'model') and hasattr(self.model, 'layers'):
             for layer in self.model.layers:
                 # 1. Add the memory injection block to the existing layer instance
-                layer.memory_injection_block = MemoryInjectionBlock()
+                layer.memory_injection_block = MemoryInjectionBlock(self.memory_store)
                 
                 # 2. Replace the layer's forward method with our custom one
                 layer.forward = types.MethodType(LyraDecoderLayer.forward, layer)

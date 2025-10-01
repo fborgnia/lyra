@@ -4,17 +4,36 @@ from transformers.models.gemma3.modeling_gemma3 import Gemma3DecoderLayer, Gemma
 from typing import Optional, Tuple
 from transformers.cache_utils import Cache
 
+
+class EpisodicMemoryStore:
+    """A simple store for episodic memories."""
+    def __init__(self):
+        self.memories = []
+
+    def add(self, memory: torch.Tensor):
+        """Adds a new memory to the store."""
+        self.memories.append(memory)
+
+    def retrieve_all(self) -> list:
+        """Retrieves all memories from the store."""
+        return self.memories
+
+
 class MemoryInjectionBlock(nn.Module):
     """
     A dummy memory injection block that prints a message.
     This block will be responsible for retrieving memories and applying them
     to the hidden states.
     """
-    def __init__(self):
+    def __init__(self, memory_store: EpisodicMemoryStore):
         super().__init__()
+        self.memory_store = memory_store
 
     def forward(self, hidden_states, **kwargs):
-        print("I'm the memory injection block")
+        memories = self.memory_store.retrieve_all()
+        if memories:
+            print(f"I'm the memory injection block, accessing {len(memories)} memories.")
+        # In the future, we will apply the memories to the hidden_states here
         return hidden_states
 
 class MemoryArchivalBlock(nn.Module):
@@ -23,26 +42,24 @@ class MemoryArchivalBlock(nn.Module):
     This block will be responsible for storing memories after a full
     generation pass.
     """
-    def __init__(self):
+    def __init__(self, memory_store: EpisodicMemoryStore):
         super().__init__()
+        self.memory_store = memory_store
 
     def forward(self, hidden_states, attention_mask):
         print("\n--- Memory Archival Block ---")
         if hidden_states is not None:
-            print(f"  Hidden state shape: {hidden_states.shape}")
-            print(f"  Hidden state dtype: {hidden_states.dtype}")
-            print(f"  Hidden state mean: {hidden_states.mean().item():.4f}")
-            print(f"  Hidden state std: {hidden_states.std().item():.4f}")
+            print(f"  Archiving hidden state with shape: {hidden_states.shape}")
+            # Detach the tensor from the computation graph before storing
+            self.memory_store.add(hidden_states.detach())
         else:
-            print("  Received None for hidden_states.")
+            print("  Received None for hidden_states, not archiving.")
 
         if attention_mask is not None:
             print(f"  Attention mask shape: {attention_mask.shape}")
-            print(f"  Attention mask dtype: {attention_mask.dtype}")
         else:
             print("  Received None for attention_mask.")
         print("-----------------------------\n")
-        # In the future, this will store the hidden_states and attention_mask
         return
 
 class LyraDecoderLayer(Gemma3DecoderLayer):
