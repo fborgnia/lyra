@@ -7,7 +7,7 @@ project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 sys.path.insert(0, project_root)
 from lyra.model import Lyra
 
-model = Lyra.from_pretrained(
+model = Lyra(
     dtype=torch.bfloat16,
     attn_implementation="eager"
 )
@@ -16,7 +16,6 @@ model.to(device)
 
 # --- Turn 0: Create an instruction to memorize ---
 # This turn's commands an instruction & purpose for the Lyra instance.
-print("--- Turn 0: Storing memory ---")
 prompt = "<start_of_turn>user\nYou are a concise and brief AI fact archival assistant. Your purpose is to remember and recall facts about users and their preferences.<end_of_turn>\n<start_of_turn>model\n"
 inputs = model.tokenizer(prompt, return_tensors="pt").to(device)
 
