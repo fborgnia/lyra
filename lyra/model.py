@@ -41,7 +41,7 @@ class Lyra(Gemma3ForCausalLM):
         if hasattr(self, 'model') and hasattr(self.model, 'layers'):
             for layer in self.model.layers:
                 # 1. Add the memory injection block to the existing layer instance
-                layer.memory_injection_block = MemoryInjectionBlock(self.memory_store)
+                layer.memory_injection_block = MemoryInjectionBlock(config, self.memory_store)
                 
                 # 2. Add the post-memory layer norm
                 layer.post_memory_layernorm = nn.LayerNorm(config.hidden_size, eps=config.rms_norm_eps)

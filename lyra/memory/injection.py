@@ -8,10 +8,10 @@ class MemoryInjectionBlock(nn.Module):
     This block is responsible for retrieving memories and applying them
     to the hidden states.
     """
-    def __init__(self, memory_store: EpisodicMemoryStore):
+    def __init__(self, config, memory_store: EpisodicMemoryStore):
         super().__init__()
         self.memory_store = memory_store
-        self.cross_attention = MemoryCrossAttention()
+        self.cross_attention = MemoryCrossAttention(config)
 
     def _select_memories(self) -> List[MemoryPackage]:
         """
