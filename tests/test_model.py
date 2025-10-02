@@ -1,67 +1,95 @@
 import sys
 import os
+import pytest
+import torch
 
 # Add the project root to the Python path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-import pytest
-import torch
-from lyra.model import GemmaWithMemory
+from lyra.model import Lyra
 
 @pytest.fixture(scope="module")
 def model():
-    """Fixture to load the local Gemma 3 model once for all tests."""
+    """Fixture to load the Lyra model once for all tests."""
     # This will use the default path './models/gemma-3-1b-it' defined in the model's __init__
-    return GemmaWithMemory()
+    return Lyra()
 
 def test_model_instantiation(model):
-    """Tests if the GemmaWithMemory model can be instantiated correctly."""
+    """Tests if the Lyra model can be instantiated correctly."""
     assert model is not None
-    assert model.gemma is not None
+    assert model.memory_store is not None
+    assert model.memory_archival_block is not None
     assert model.tokenizer is not None
-    assert model.memory_graph is None
-    assert model.start_of_turn_token_id is not None
-    assert model.end_of_turn_token_id is not None
+    assert hasattr(model.model.layers[0], 'memory_injection_block'), "Decoder layers should have a memory_injection_block"
+    assert hasattr(model.model.layers[0], 'post_memory_layernorm'), "Decoder layers should have a post_memory_layernorm"
 
-def test_forward_pass_triggers_memory_reset(model, capsys):
+def test_generate_and_archive(model, capsys):
     """
-    Tests if the forward() method correctly detects the start of a turn
-    and prints the memory reset message.
+    Tests if the generate() method runs, triggers memory archival,
+    and that the memory store is populated.
     """
-    # Simulate a new conversation by including the <start_of_turn> token
-    prompt = "<start_of_turn>user\nWhat is the capital of France?<end_of_turn>\n<start_of_turn>model\n"
-    inputs = model.tokenizer(prompt, return_tensors="pt")
+    # Clear any existing memories
+    model.memory_store.memories.clear()
+    assert len(model.memory_store.retrieve_all()) == 0
 
-    # The forward pass should detect the start token and reset the memory
-    model.forward(**inputs)
-
-    captured = capsys.readouterr()
-    assert "New conversation detected. Resetting memory." in captured.out
-
-def test_generate_triggers_memory_update_placeholder(model, capsys):
-    """
-    Tests if the generate() method correctly triggers the placeholder
-    for the memory update logic after generating a response.
-    """
-    prompt = "<start_of_turn>user\nWhat is the capital of France?<end_of_turn>\n<start_of_turn>model\nIt's Paris.<end_of_turn>\n<start_of_turn>user\nIs it pretty?<end_of_turn>\n<start_of_turn>model"
+    prompt = "What is the capital of France?"
     inputs = model.tokenizer(prompt, return_tensors="pt")
     
-    # Generate a short response. The model should produce an <end_of_turn> token.
+    # Generate a short response
     outputs = model.generate(
         input_ids=inputs["input_ids"],
         attention_mask=inputs["attention_mask"],
-        max_new_tokens=15,
-        eos_token_id=model.end_of_turn_token_id
+        max_new_tokens=5,
     )
 
-     # Decode the full output to text for visual inspection
-    full_text = model.tokenizer.decode(outputs[0], skip_special_tokens=False)
-    captured = capsys.readouterr()
+    # Decode the full output to text for visual inspection
+    full_text = model.tokenizer.decode(outputs[0], skip_special_tokens=True)
     
     with capsys.disabled():
         print(f"\n--- Model Output ---\n{full_text}\n--------------------")
-        print(f"--- Captured STDOUT ---\n{captured.out.strip()}\n---------------------")
 
-    #captured = capsys.readouterr()
-    # Check that the placeholder message for the memory update is printed
-    assert "Updating memory" in captured.out
+    captured = capsys.readouterr()
+    
+    # 1. Check that the archival block was called
+    assert "--- Memory Archival Block ---" in captured.out
+    assert "Created index vector shape" in captured.out
+
+    # 2. Check that a memory was actually added to the store
+    memories = model.memory_store.retrieve_all()
+    assert len(memories) == 1
+    
+    # 3. Check the contents of the stored memory package
+    hidden_state, attention_mask, index_vector = memories[0]
+    assert isinstance(hidden_state, torch.Tensor)
+    assert isinstance(attention_mask, torch.Tensor)
+    assert isinstance(index_vector, torch.Tensor)
+    assert hidden_state.dim() == 3  # (batch_size, seq_len, hidden_dim)
+    assert index_vector.dim() == 2 # (batch_size, hidden_dim)
+
+def test_injection_block_is_called(model, capsys):
+    """
+    Tests that the memory injection block is called during a generation pass
+    when memories are present in the store.
+    """
+    # Ensure there is a memory in the store from the previous test
+    if not model.memory_store.retrieve_all():
+        # If the store is empty, run the previous test to populate it
+        test_generate_and_archive(model, capsys)
+
+    assert len(model.memory_store.retrieve_all()) > 0
+
+    prompt = "What is its primary language?"
+    inputs = model.tokenizer(prompt, return_tensors="pt")
+    
+    # Generate a response
+    model.generate(
+        input_ids=inputs["input_ids"],
+        attention_mask=inputs["attention_mask"],
+        max_new_tokens=5,
+    )
+
+    captured = capsys.readouterr()
+
+    # Check that the injection block's placeholder message was printed
+    assert "I'm the memory injection block" in captured.out
+    assert "Retrieved 1 memory packages." in captured.out

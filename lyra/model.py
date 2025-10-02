@@ -2,12 +2,12 @@ import os
 import torch
 import torch.nn as nn
 from transformers import Gemma3ForCausalLM, AutoTokenizer, AutoConfig
-from .episodic_memory import LyraDecoderLayer, MemoryInjectionBlock, MemoryArchivalBlock, EpisodicMemoryStore
+from .memory import LyraDecoderLayer, MemoryInjectionBlock, MemoryArchivalBlock, EpisodicMemoryStore
 import types
 from typing import Optional, Tuple, Union, Dict, Any
 from transformers.modeling_outputs import CausalLMOutputWithPast
 
-
+ 
 class Lyra(Gemma3ForCausalLM):
     """
     Lyra is a Gemma 3 model that integrates a memory injection block into its
@@ -43,7 +43,10 @@ class Lyra(Gemma3ForCausalLM):
                 # 1. Add the memory injection block to the existing layer instance
                 layer.memory_injection_block = MemoryInjectionBlock(self.memory_store)
                 
-                # 2. Replace the layer's forward method with our custom one
+                # 2. Add the post-memory layer norm
+                layer.post_memory_layernorm = nn.LayerNorm(config.hidden_size, eps=config.rms_norm_eps)
+
+                # 3. Replace the layer's forward method with our custom one
                 layer.forward = types.MethodType(LyraDecoderLayer.forward, layer)
 
         # Register a forward hook on the final layer norm to capture the last hidden state
