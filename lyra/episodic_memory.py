@@ -10,9 +10,9 @@ class EpisodicMemoryStore:
     def __init__(self):
         self.memories = []
 
-    def add(self, memory: torch.Tensor, attention_mask: Optional[torch.Tensor]):
-        """Adds a new memory to the store."""
-        self.memories.append((memory, attention_mask))
+    def add(self, memory: torch.Tensor, attention_mask: Optional[torch.Tensor], index_vector: torch.Tensor):
+        """Adds a new memory package to the store."""
+        self.memories.append((memory, attention_mask, index_vector))
 
     def retrieve_all(self) -> list:
         """Retrieves all memories from the store."""
@@ -35,9 +35,9 @@ class MemoryInjectionBlock(nn.Module):
             return hidden_states
 
         print("I'm the memory injection block")
-        print(f"  Retrieved {len(memories_with_masks)} memories.")
+        print(f"  Retrieved {len(memories_with_masks)} memory packages.")
         # Unpack for future use
-        memories, attention_masks = zip(*memories_with_masks)
+        memories, attention_masks, index_vectors = zip(*memories_with_masks)
         # In the future, we will apply the memories to the hidden_states here
         return hidden_states
 
@@ -53,23 +53,29 @@ class MemoryArchivalBlock(nn.Module):
 
     def forward(self, hidden_states, attention_mask):
         print("\n--- Memory Archival Block ---")
-        if hidden_states is not None:
-            print(f"  Hidden state shape: {hidden_states.shape}")
-            print(f"  Hidden state dtype: {hidden_states.dtype}")
-            print(f"  Hidden state mean: {hidden_states.mean().item():.4f}")
-            print(f"  Hidden state std: {hidden_states.std().item():.4f}")
-            # Detach the tensor from the computation graph before storing
-            self.memory_store.add(
-                hidden_states.detach(),
-                attention_mask.detach() if attention_mask is not None else None
-            )
-        else:
-            print("  Received None for hidden_states, not archiving.")
+        if hidden_states is not None and attention_mask is not None:
+            # 1. Create the index vector via masked mean pooling
+            mask_expanded = attention_mask.unsqueeze(-1).expand_as(hidden_states)
+            masked_hidden_states = hidden_states * mask_expanded
+            summed_hidden_states = masked_hidden_states.sum(dim=1)
+            # Get the number of actual tokens, avoiding division by zero
+            num_tokens = attention_mask.sum(dim=1).unsqueeze(-1).clamp(min=1)
+            index_vector = summed_hidden_states / num_tokens
 
-        if attention_mask is not None:
-            print(f"  Attention mask shape: {attention_mask.shape}")
+            print(f"  - Hidden state shape: {hidden_states.shape}")
+            print(f"  - Attention mask shape: {attention_mask.shape}")
+            print(f"  - Created index vector shape: {index_vector.shape}")
+
+            # 2. Detach all tensors from the computation graph before storing
+            detached_hs = hidden_states.detach()
+            detached_mask = attention_mask.detach()
+            detached_index = index_vector.detach()
+
+            # 3. Add the complete memory package to the store
+            self.memory_store.add(detached_hs, detached_mask, detached_index)
         else:
-            print("  Received None for attention_mask.")
+            print("  - Received None for hidden_states or attention_mask, not archiving.")
+
         print("-----------------------------\n")
         return
 

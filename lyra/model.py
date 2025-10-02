@@ -53,37 +53,38 @@ class Lyra(Gemma3ForCausalLM):
     def generate(self, *args, **kwargs):
         """
         Wraps the original generate method to handle memory archival.
-        A forward hook is temporarily registered to capture the final hidden state
-        after the full generation is complete.
+        First, it generates the token sequence. Then, it performs a single
+        forward pass with the complete sequence to reliably capture the final
+        hidden states for archival.
         """
-        handle = None
+        # Step 1: Generate token sequences.
+        # Ensure no conflicting flags are passed from previous attempts.
+        kwargs.pop('output_hidden_states', None)
+        kwargs.pop('return_dict_in_generate', None)
         
-        # This list will store the last hidden state from the final forward pass
-        last_hidden_state_container = []
+        generated_outputs = super().generate(*args, **kwargs)
 
-        def hook(module, input, output):
-            # The hook will be called for each token generation step.
-            # We only care about the last one, so we just keep overwriting.
-            # The 'input' is a tuple, and the first element is the hidden state tensor.
-            last_hidden_state_container.clear()
-            last_hidden_state_container.append(input[0])
+        # The output of generate can be a tensor or a dict-like object.
+        output_sequences = generated_outputs if isinstance(generated_outputs, torch.Tensor) else generated_outputs.sequences
 
-        if hasattr(self, 'model') and hasattr(self.model, 'norm'):
-            handle = self.model.norm.register_forward_hook(hook)
+        # Step 2: Perform a single forward pass with the full generated sequence to get the final state.
+        # We create an attention mask where all tokens are attended to.
+        attention_mask = torch.ones_like(output_sequences)
 
-        try:
-            # Call the original generate method
-            outputs = super().generate(*args, **kwargs)
-        finally:
-            # Always remove the hook afterwards
-            if handle:
-                handle.remove()
-
-        # After generation, perform the memory archival with the captured hidden state
-        if last_hidden_state_container:
-            last_hidden_state = last_hidden_state_container[0]
-            # We need to find the attention mask. A common way is to look for it in kwargs.
-            attention_mask = kwargs.get('attention_mask', None)
-            self.memory_archival_block(last_hidden_state, attention_mask)
+        # We don't need to track gradients for this archival pass.
+        with torch.no_grad():
+            model_outputs = self.forward(
+                input_ids=output_sequences,
+                attention_mask=attention_mask,
+                output_hidden_states=True
+            )
         
-        return outputs
+        # The `hidden_states` is a tuple of tensors (one for each layer + embeddings).
+        # We want the output of the last decoder layer.
+        last_hidden_state = model_outputs.hidden_states[-1]
+
+        # Step 3: Archive the memory. The tensors are now guaranteed to be aligned.
+        self.memory_archival_block(last_hidden_state, attention_mask)
+
+        # Step 4: Return the original generated sequences, maintaining compatibility.
+        return generated_outputs
