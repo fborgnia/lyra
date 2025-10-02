@@ -91,5 +91,41 @@ def test_injection_block_is_called(model, capsys):
     captured = capsys.readouterr()
 
     # Check that the injection block's placeholder message was printed
-    assert "I'm the memory injection block" in captured.out
-    assert "Retrieved 1 memory packages." in captured.out
+    assert "--- Memory Injection Block ---" in captured.out
+    assert "Selected 1 memories for injection." in captured.out
+
+def test_injection_selects_first_and_last(model, capsys):
+    """
+    Tests that the memory injection block selects both the first and last
+    memories when more than one is available.
+    """
+    # Ensure the store has at least two memories.
+    # The first one is from the previous test.
+    assert model.memory_store.count() >= 1
+    
+    # Generate another response to add a second memory
+    prompt = "And what is its population?"
+    inputs = model.tokenizer(prompt, return_tensors="pt")
+    model.generate(
+        input_ids=inputs["input_ids"],
+        attention_mask=inputs["attention_mask"],
+        max_new_tokens=5,
+    )
+    
+    # Now there should be at least two memories
+    assert model.memory_store.count() >= 2
+    
+    # Run one more generation to trigger the injection logic
+    prompt = "Is it a good place to visit?"
+    inputs = model.tokenizer(prompt, return_tensors="pt")
+    model.generate(
+        input_ids=inputs["input_ids"],
+        attention_mask=inputs["attention_mask"],
+        max_new_tokens=5,
+    )
+
+    captured = capsys.readouterr()
+
+    # Check that the injection block selected two memories
+    assert "--- Memory Injection Block ---" in captured.out
+    assert "Selected 2 memories for injection." in captured.out
