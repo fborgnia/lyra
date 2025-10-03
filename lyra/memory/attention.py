@@ -15,9 +15,15 @@ class MemoryCrossAttention(nn.Module):
         self.config = config
         self.hidden_size = config.hidden_size
         self.num_heads = config.num_attention_heads
-        self.head_dim = config.head_dim
+        self.head_dim = self.hidden_size // self.num_heads
         self.num_key_value_heads = config.num_key_value_heads
         self.num_key_value_groups = self.num_heads // self.num_key_value_heads
+
+        if (self.head_dim * self.num_heads) != self.hidden_size:
+            raise ValueError(
+                f"hidden_size must be divisible by num_heads (got `hidden_size`: {self.hidden_size}"
+                f" and `num_heads`: {self.num_heads})."
+            )
 
         # Projections for Key, Value (from memory state), and Output.
         # Query is projected externally and passed in.
@@ -52,6 +58,11 @@ class MemoryCrossAttention(nn.Module):
         # Repeat K and V heads to match Q heads for Grouped-Query Attention
         key_states = key_states.repeat_interleave(self.num_key_value_groups, dim=1)
         value_states = value_states.repeat_interleave(self.num_key_value_groups, dim=1)
+
+        # Convert the long attention mask to a boolean mask before use
+        if memory_attention_mask is not None:
+            if memory_attention_mask.dtype != torch.bool:
+                memory_attention_mask = memory_attention_mask.to(torch.bool)
 
         # Apply scaled dot-product attention
         # We do not apply RoPE, as we are crossing time-steps.

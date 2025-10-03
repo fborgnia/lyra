@@ -65,10 +65,24 @@ class MemoryInjectionBlock(nn.Module):
         concatenated_memory_states = torch.cat(memory_states, dim=1)
         concatenated_attention_mask = torch.cat(attention_masks, dim=1)
 
-        print(f"  - Concatenated memory states shape: {concatenated_memory_states.shape}")
-        print(f"  - Concatenated attention mask shape: {concatenated_attention_mask.shape}")
-        
+        print(
+            f"  - Concatenated memory states shape: {concatenated_memory_states.shape}"
+        )
+        print(
+            f"  - Concatenated attention mask shape: {concatenated_attention_mask.shape}"
+        )
+
+        # Step 4.5: Perform Cross-Attention (Inert)
+        aggregated_memory_enrichment = self.cross_attention(
+            query_states=query_states,
+            memory_states=concatenated_memory_states,
+            memory_attention_mask=concatenated_attention_mask,
+        )
+        print(
+            f"Aggregated Memory Enrichment | Shape: {aggregated_memory_enrichment.shape} | Mean: {aggregated_memory_enrichment.mean():.4f} | Std: {aggregated_memory_enrichment.std():.4f}"
+        )
+
         print("------------------------------\n")
-        
+
         # Return a zero tensor as per the plan for this milestone
         return torch.zeros_like(hidden_states)
