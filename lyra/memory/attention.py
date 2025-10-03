@@ -19,29 +19,28 @@ class MemoryCrossAttention(nn.Module):
         self.num_key_value_heads = config.num_key_value_heads
         self.num_key_value_groups = self.num_heads // self.num_key_value_heads
 
-        # Projections for Query (from current state), Key and Value (from memory state)
-        self.q_proj = nn.Linear(self.hidden_size, self.num_heads * self.head_dim, bias=False)
+        # Projections for Key, Value (from memory state), and Output.
+        # Query is projected externally and passed in.
         self.k_proj = nn.Linear(self.hidden_size, self.num_key_value_heads * self.head_dim, bias=False)
         self.v_proj = nn.Linear(self.hidden_size, self.num_key_value_heads * self.head_dim, bias=False)
         self.o_proj = nn.Linear(self.num_heads * self.head_dim, self.hidden_size, bias=False)
 
     def forward(
         self,
-        current_states: torch.Tensor,
+        query_states: torch.Tensor,
         memory_states: torch.Tensor,
-        attention_mask: Optional[torch.Tensor] = None,
+        memory_attention_mask: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         """
         Args:
-            current_states (`torch.Tensor`): The hidden states of the current sequence (Query source).
+            query_states (`torch.Tensor`): The pre-projected hidden states of the current sequence (Query source).
             memory_states (`torch.Tensor`): The hidden states of the past memory (Key/Value source).
-            attention_mask (`torch.Tensor`, *optional*): The attention mask for the memory sequence.
+            memory_attention_mask (`torch.Tensor`, *optional*): The attention mask for the memory sequence.
         """
-        batch_size, q_len, _ = current_states.size()
+        batch_size, q_len, _ = query_states.size()
         _, kv_seq_len, _ = memory_states.size()
 
-        # Project the inputs into Q, K, V
-        query_states = self.q_proj(current_states)
+        # Project the memory inputs into K, V
         key_states = self.k_proj(memory_states)
         value_states = self.v_proj(memory_states)
 
@@ -57,7 +56,7 @@ class MemoryCrossAttention(nn.Module):
         # Apply scaled dot-product attention
         # We do not apply RoPE, as we are crossing time-steps.
         attn_output = F.scaled_dot_product_attention(
-            query_states, key_states, value_states, attn_mask=attention_mask, is_causal=False
+            query_states, key_states, value_states, attn_mask=memory_attention_mask, is_causal=False
         )
 
         # Reshape and apply output projection
