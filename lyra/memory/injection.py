@@ -12,6 +12,9 @@ class MemoryInjectionBlock(nn.Module):
         super().__init__()
         self.memory_store = memory_store
         self.cross_attention = MemoryCrossAttention(config)
+        # Each layer gets its own query projection to map its specific hidden state
+        # into a space comparable with the memory keys.
+        self.q_proj = nn.Linear(config.hidden_size, config.hidden_size, bias=False)
 
     def _select_memories(self) -> List[MemoryPackage]:
         """
