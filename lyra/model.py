@@ -51,7 +51,28 @@ class Lyra(Gemma3ForCausalLM):
 
         # Register a forward hook on the final layer norm to capture the last hidden state
         # This is now handled by the generate wrapper
-        pass
+        self._freeze_base_model()
+    
+    def _freeze_base_model(self):
+        """
+        (Internal) Freezes all parameters of the base Gemma model, leaving only the
+        memory-related components (injection blocks and layer norms) trainable.
+        """
+        # First, freeze all parameters
+        for param in self.parameters():
+            param.requires_grad = False
+
+        # Then, unfreeze only the parameters of our custom memory modules
+        for layer in self.model.layers:
+            if hasattr(layer, 'memory_injection_block'):
+                for param in layer.memory_injection_block.parameters():
+                    param.requires_grad = True
+            if hasattr(layer, 'post_memory_layernorm'):
+                for param in layer.post_memory_layernorm.parameters():
+                    param.requires_grad = True
+        
+        num_trainable = sum(p.numel() for p in self.parameters() if p.requires_grad)
+        print(f"Lyra base model frozen. Trainable parameters: {num_trainable}")
 
     def generate(self, *args, **kwargs):
         """
