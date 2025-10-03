@@ -44,6 +44,10 @@ class MemoryInjectionBlock(nn.Module):
         return selected_memories
 
     def forward(self, hidden_states, **kwargs):
+        # Step 4.4: Activate Layer-Specific Query Projection
+        query_states = self.q_proj(hidden_states)
+        print(f"Query States | Shape: {query_states.shape} | Mean: {query_states.mean():.4f} | Std: {query_states.std():.4f}")
+
         selected_memories = self._select_memories()
 
         if not selected_memories:
