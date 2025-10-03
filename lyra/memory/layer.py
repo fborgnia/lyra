@@ -28,9 +28,17 @@ class LyraDecoderLayer(Gemma3DecoderLayer):
         residual = hidden_states
         hidden_states = self.input_layernorm(hidden_states)
         
-        # Memory branch
+        # --- Memory Branch (Step 4.7: Full Activation) ---
+        # Create a residual connection point for the memory injection
+        memory_residual = hidden_states
+        
+        # Get the processed memory enrichment
         memory_output = self.memory_injection_block(hidden_states)
         print(f"[LyraDecoderLayer] Memory Output | Shape: {memory_output.shape} | Mean: {memory_output.mean():.4f} | Std: {memory_output.std():.4f}")
+        
+        # Normalize the memory output and add it to the main path
+        injected_hidden_states = self.post_memory_layernorm(memory_output)
+        hidden_states = memory_residual + injected_hidden_states
         
         # apply global RoPE to non-sliding layer only
         if self.self_attn.is_sliding:
