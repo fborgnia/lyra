@@ -52,7 +52,7 @@ def load_local_gemma():
     print(f"Loading local Gemma model from: {GEMMA_MODEL_PATH}")
     tokenizer = AutoTokenizer.from_pretrained(GEMMA_MODEL_PATH)
     model = AutoModelForCausalLM.from_pretrained(
-        GEMMA_MODEL_PATH, device_map="auto", torch_dtype=torch.bfloat16
+        GEMMA_MODEL_PATH, torch_dtype=torch.bfloat16
     )
     print("Local Gemma model loaded successfully.")
     return model, tokenizer
@@ -70,95 +70,67 @@ def generate_u1(gemini_model) -> str:
     return response.text.strip()
 
 
-def generate_m2(gemma_model, gemma_tokenizer, u1: str, u2: str) -> str:
-    """
-    Generates the target model response (M2) by first generating the
-    acknowledgement (M1) and then using the full, authentic context.
-    """
-
-    generation_config = {
-        "max_new_tokens": 256,
-        "do_sample": True,
-        "temperature": 0.01,
-        "top_p": 0.99,
-    }
-
-    # Step 1: Generate the model's acknowledgement (M1) dynamically
-    m1_chat_prompt = [{"role": "user", "content": u1}]
-    m1_prompt_for_gemma = gemma_tokenizer.apply_chat_template(
-        m1_chat_prompt, tokenize=False, add_generation_prompt=True
-    )
-    m1_inputs = gemma_tokenizer(m1_prompt_for_gemma, return_tensors="pt").to(
-        gemma_model.device
-    )
-    m1_outputs = gemma_model.generate(**m1_inputs, **generation_config)
-    m1_generated_text = gemma_tokenizer.decode(
-        m1_outputs[0, m1_inputs["input_ids"].shape[1] :], skip_special_tokens=True
-    ).strip()
-
-    # Step 2: Construct the full chat history with the generated M1
-    chat_prompt_for_m2 = [
-        {"role": "user", "content": u1},
-        {"role": "model", "content": m1_generated_text},
-        {"role": "user", "content": u2},
-    ]
-
-    # Apply the chat template for the final generation
-    prompt_for_m2 = gemma_tokenizer.apply_chat_template(
-        chat_prompt_for_m2, tokenize=False, add_generation_prompt=True
-    )
-
-    m2_inputs = gemma_tokenizer(prompt_for_m2, return_tensors="pt").to(
-        gemma_model.device
-    )
-
-    # Generate the final response (M2)
-    m2_outputs = gemma_model.generate(**m2_inputs, **generation_config)
-
-    # Decode only the newly generated tokens for M2
-    m2_response_text = gemma_tokenizer.decode(
-        m2_outputs[0, m2_inputs["input_ids"].shape[1] :], skip_special_tokens=True
-    )
-    return m2_response_text.strip()
-
-
 def main(num_instructions: int):
-    """Main function to generate the training curriculum."""
-
+    """
+    Generates the training curriculum using a safe, batch-per-instruction strategy.
+    """
     # 1. Configure APIs and load models
     configure_gemini()
     gemini_model = genai.GenerativeModel(GEMINI_MODEL_NAME)
     gemma_model, gemma_tokenizer = load_local_gemma()
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    gemma_model.to(device)
+    gemma_tokenizer.pad_token = gemma_tokenizer.eos_token
+    print(f"Gemma model loaded on device: {device}")
 
-    # 2. Ensure output directory exists
+    generation_config = {
+        "max_new_tokens": 256,
+        "do_sample": True,
+        "temperature": 0.1,
+        "top_p": 0.95,
+    }
+
+    # 2. Generate all U1 instructions
+    print(f"\nGenerating {num_instructions} unique U1 instructions from Gemini...")
+    u1_instructions = [generate_u1(gemini_model) for _ in tqdm(range(num_instructions), desc="Generating U1s")]
+
+    # 3. Process each U1 instruction and its U2 questions in a batch
+    print(f"\nGenerating triplets for {num_instructions} instructions...")
+    all_triplets = []
     os.makedirs(os.path.dirname(OUTPUT_FILE), exist_ok=True)
 
-    # 3. Generate the base U1 instructions
-    print(f"\nGenerating {num_instructions} base U1 instructions from Gemini...")
-    u1_instructions = []
-    for _ in tqdm(range(num_instructions), desc="Generating U1 Instructions"):
-        u1 = generate_u1(gemini_model)
-        u1_instructions.append(u1)
-    
-    print(f"Generated {len(u1_instructions)} unique instructions.")
-
-    # 4. Generate the full dataset by crossing U1s with all U2s
-    total_samples = len(u1_instructions) * len(U2_QUESTIONS)
-    print(f"\nGenerating {total_samples} total samples for the curriculum...")
-    
-    with open(OUTPUT_FILE, "w") as f, tqdm(total=total_samples, desc="Generating Triplets") as pbar:
+    with open(OUTPUT_FILE, "w") as f, tqdm(total=num_instructions * len(U2_QUESTIONS), desc="Generating Triplets") as pbar:
         for u1 in u1_instructions:
-            for u2 in U2_QUESTIONS:
-                # Generate M2 using the full context
-                m2 = generate_m2(gemma_model, gemma_tokenizer, u1, u2)
+            # --- Generate M1 for this U1 ---
+            m1_chat_prompt = [{"role": "user", "content": u1}]
+            m1_prompt_for_gemma = gemma_tokenizer.apply_chat_template(m1_chat_prompt, tokenize=False, add_generation_prompt=True)
+            m1_inputs = gemma_tokenizer(m1_prompt_for_gemma, return_tensors="pt").to(device)
+            m1_outputs = gemma_model.generate(**m1_inputs, **generation_config)
+            m1_response = gemma_tokenizer.decode(m1_outputs[0, m1_inputs["input_ids"].shape[1]:], skip_special_tokens=True).strip()
 
-                # Create the JSONL entry
-                record = {"U1": u1, "U2": u2, "M2": m2}
-                f.write(json.dumps(record) + "\n")
+            # --- Prepare a batch of M2 prompts for all U2 questions for this U1 ---
+            m2_prompts_for_batch = []
+            for u2 in U2_QUESTIONS:
+                chat_prompt = [
+                    {"role": "user", "content": u1},
+                    {"role": "model", "content": m1_response},
+                    {"role": "user", "content": u2},
+                ]
+                prompt_text = gemma_tokenizer.apply_chat_template(chat_prompt, tokenize=False, add_generation_prompt=True)
+                m2_prompts_for_batch.append(prompt_text)
+
+            # --- Batch generate all M2 answers for this U1 ---
+            m2_inputs = gemma_tokenizer(m2_prompts_for_batch, return_tensors="pt", padding=True).to(device)
+            m2_outputs = gemma_model.generate(**m2_inputs, **generation_config)
+            m2_responses = gemma_tokenizer.batch_decode(m2_outputs[:, m2_inputs['input_ids'].shape[1]:], skip_special_tokens=True)
+
+            # --- Store the results for this batch ---
+            for i, u2 in enumerate(U2_QUESTIONS):
+                triplet = {"U1": u1, "U2": u2, "M2": m2_responses[i].strip()}
+                f.write(json.dumps(triplet) + "\n")
                 pbar.update(1)
 
-    print(f"\nSuccessfully generated {total_samples} samples.")
-    print(f"Dataset saved to: {OUTPUT_FILE}")
+    print("\nDataset generation complete.")
 
 
 if __name__ == "__main__":
