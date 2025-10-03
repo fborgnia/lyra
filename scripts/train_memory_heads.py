@@ -91,20 +91,50 @@ def main():
     num_trainable_params = sum(p.numel() for p in trainable_params)
     print(f"Optimizer configured. Number of trainable parameters: {num_trainable_params}")
 
-    # --- 6. The Training Loop (Skeleton) ---
+    # --- 5. Loss Function ---
+    # Standard cross-entropy loss for language modeling.
+    # `ignore_index=-100` is used to mask out parts of the input we don't want to
+    # calculate the loss on (e.g., the user's prompt part of the turn).
+    loss_fn = torch.nn.CrossEntropyLoss(ignore_index=-100)
+
+    # --- 6. The Training Loop ---
     print(f"Starting training for {num_epochs} epochs...")
     for epoch in range(num_epochs):
         total_epoch_loss = 0
         model.train()
         
-        # We will process one sample at a time for now
-        for sample in tqdm(dataset, desc=f"Epoch {epoch+1}/{num_epochs}"):
-            
-            # This is where we will call our new function and the loss calculation
-            # For now, we just call the simulation function to test it
+        progress_bar = tqdm(dataset, desc=f"Epoch {epoch+1}/{num_epochs}")
+        for sample in progress_bar:
             try:
+                optimizer.zero_grad()
+
                 logits, input_ids = process_training_sample(model, tokenizer, sample, device)
-                # In the next step, we will add loss calculation and backpropagation here
+
+                # --- Loss Calculation ---
+                # The model predicts the next token, so we shift the logits and labels.
+                shift_logits = logits[..., :-1, :].contiguous()
+                shift_labels = input_ids[..., 1:].contiguous()
+
+                # We only want to calculate the loss on the model's response (M2),
+                # not on the user's prompt (U2). We find where the model's turn starts.
+                user_prompt_for_turn2 = tokenizer.apply_chat_template(
+                    [{"role": "user", "content": sample["U2"]}],
+                    tokenize=False, add_generation_prompt=True
+                )
+                user_prompt_len = len(tokenizer(user_prompt_for_turn2).input_ids) - 1 # Exclude the final generation token
+
+                # Set the labels for the user prompt part to -100 so they are ignored.
+                shift_labels[:, :user_prompt_len] = -100
+
+                # Flatten the tokens to fit the loss function's expected input shape.
+                loss = loss_fn(shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1))
+
+                # --- Backpropagation ---
+                loss.backward()
+                optimizer.step()
+
+                total_epoch_loss += loss.item()
+                progress_bar.set_postfix({"loss": f"{loss.item():.4f}"})
                 
             except Exception as e:
                 print(f"Error processing sample: {sample}")
@@ -113,10 +143,10 @@ def main():
                 # For now, we'll just print and continue
                 continue
 
-        # avg_epoch_loss = total_epoch_loss / len(dataset)
-        # print(f"--- Epoch {epoch+1} finished. Average Loss: {avg_epoch_loss:.4f} ---")
+        avg_epoch_loss = total_epoch_loss / len(dataset)
+        print(f"--- Epoch {epoch+1} finished. Average Loss: {avg_epoch_loss:.4f} ---")
 
-    print("Training finished (simulation part).")
+    print("Training finished.")
 
     # --- 7. Save the trained memory head weights (Placeholder) ---
     # We will implement this properly in a later step
