@@ -13,7 +13,7 @@ class MemoryArchivalBlock(nn.Module):
         self.memory_store = memory_store
 
     def forward(self, hidden_states, attention_mask):
-        print("\n--- Memory Archival Block ---")
+        #print("\n--- Memory Archival Block ---")
         if hidden_states is not None and attention_mask is not None:
             # 1. Create the index vector via masked mean pooling
             mask_expanded = attention_mask.unsqueeze(-1).expand_as(hidden_states)
@@ -23,9 +23,9 @@ class MemoryArchivalBlock(nn.Module):
             num_tokens = attention_mask.sum(dim=1).unsqueeze(-1).clamp(min=1)
             index_vector = summed_hidden_states / num_tokens
 
-            print(f"  - Hidden state shape: {hidden_states.shape}")
-            print(f"  - Attention mask shape: {attention_mask.shape}")
-            print(f"  - Created index vector shape: {index_vector.shape}")
+            #print(f"  - Hidden state shape: {hidden_states.shape}")
+            #print(f"  - Attention mask shape: {attention_mask.shape}")
+            #print(f"  - Created index vector shape: {index_vector.shape}")
 
             # 2. Detach all tensors from the computation graph before storing
             detached_hs = hidden_states.detach()
@@ -37,5 +37,5 @@ class MemoryArchivalBlock(nn.Module):
         else:
             print("  - Received None for hidden_states or attention_mask, not archiving.")
 
-        print("-----------------------------\n")
+        #print("-----------------------------\n")
         return

@@ -34,7 +34,7 @@ class LyraDecoderLayer(Gemma3DecoderLayer):
         
         # Get the processed memory enrichment
         memory_output = self.memory_injection_block(hidden_states)
-        print(f"[LyraDecoderLayer] Memory Output | Shape: {memory_output.shape} | Mean: {memory_output.mean():.4f} | Std: {memory_output.std():.4f}")
+        #print(f"[LyraDecoderLayer] Memory Output | Shape: {memory_output.shape} | Mean: {memory_output.mean():.4f} | Std: {memory_output.std():.4f}")
         
         # Normalize the memory output and add it to the main path
         injected_hidden_states = self.post_memory_layernorm(memory_output)

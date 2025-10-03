@@ -1,8 +1,23 @@
 # Lyra: A Gemma-based LLM with In-Layer Episodic Memory
 
-Lyra is an experimental language model that enhances a standard Gemma instruction-tuned model with deeply integrated episodic memory system. Instead of managing context by manipulating prompts externally, Lyra injects memory directly into the residual stream of each Transformer decoder layer.
+Lyra is an experimental architecture that explores a paradigm for conversational context management in Transformer-based models. Built upon a standard Gemma instruction-tuned model, Lyra introduces a system for injecting episodic memory directly into the residual stream of each decoder layer.
 
-This allows the model to be aware of conversational history at every stage of processing, enabling a more nuanced form of context-awareness. The memory modules are designed to be lightweight and trainable via Parameter-Efficient Fine-Tuning (PEFT), leaving the base model's weights entirely frozen.
+This approach uses trainable cross-attention modules to query the hidden states of past conversational turns, providing historical context at every stage of processing. The design aims to offer an alternative to managing long-term context through ever-growing prompts. The implementation follows a Parameter-Efficient Fine-Tuning (PEFT) strategy, where the base model's weights remain frozen, and only the lightweight memory components are trained.
+
+## Hypothesis and Objective
+
+This project serves as a foundational experiment for a broader architectural hypothesis concerning knowledge integration in Transformer models.
+
+**Broader Hypothesis:** *It is possible to map structured, external knowledge directly onto the token-level hidden states of an input sequence. A dedicated cross-attention mechanism can be trained to query an external knowledge source (such as a vector database or, in this case, an episodic memory store) and inject that knowledge into the residual stream. This effectively enriches the input sequence with relevant external context, allowing the model to process it as if it were part of the original prompt.*
+
+**The Lyra Experiment:** This project tests a specific instance of this hypothesis by using past conversational turns as the external knowledge source. The objective is to validate that:
+1.  A cross-attention mechanism can learn to retrieve and inject this episodic knowledge effectively.
+2.  The frozen, pre-trained layers of the base model can interpret and use this injected knowledge to make accurate predictions.
+
+### Measurable Outcome
+
+Success is measured by the model's ability to solve a task that is impossible without access to the "external" knowledge from a previous turn.
+
 
 ## Architecture Overview: How It Works
 
