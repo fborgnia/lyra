@@ -29,13 +29,9 @@ class LyraDecoderLayer(Gemma3DecoderLayer):
         hidden_states = self.input_layernorm(hidden_states)
         
         # Memory branch
-        memory_residual = hidden_states
-        injected_hidden_states = self.memory_injection_block(hidden_states)
-        injected_hidden_states = self.post_memory_layernorm(injected_hidden_states)
+        memory_output = self.memory_injection_block(hidden_states)
+        print(f"[LyraDecoderLayer] Memory Output | Shape: {memory_output.shape} | Mean: {memory_output.mean():.4f} | Std: {memory_output.std():.4f}")
         
-        # Merge branches
-        hidden_states = memory_residual + injected_hidden_states
-
         # apply global RoPE to non-sliding layer only
         if self.self_attn.is_sliding:
             position_embeddings = position_embeddings_local

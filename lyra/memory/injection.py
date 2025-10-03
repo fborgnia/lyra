@@ -44,45 +44,23 @@ class MemoryInjectionBlock(nn.Module):
         return selected_memories
 
     def forward(self, hidden_states, **kwargs):
-        # Step 4.4: Activate Layer-Specific Query Projection
         query_states = self.q_proj(hidden_states)
-        print(f"Query States | Shape: {query_states.shape} | Mean: {query_states.mean():.4f} | Std: {query_states.std():.4f}")
 
         selected_memories = self._select_memories()
 
         if not selected_memories:
-            # Return a zero tensor to maintain a consistent return type
             return torch.zeros_like(hidden_states)
 
-        print("\n--- Memory Injection Block ---")
-        print(f"  - Selected {len(selected_memories)} memories for injection.")
-        
-        # Concatenate memory states and attention masks
-        # The order is preserved from _select_memories, ensuring chronological composition
         memory_states = [mem[0] for mem in selected_memories]
         attention_masks = [mem[1] for mem in selected_memories]
 
         concatenated_memory_states = torch.cat(memory_states, dim=1)
         concatenated_attention_mask = torch.cat(attention_masks, dim=1)
 
-        print(
-            f"  - Concatenated memory states shape: {concatenated_memory_states.shape}"
-        )
-        print(
-            f"  - Concatenated attention mask shape: {concatenated_attention_mask.shape}"
-        )
-
-        # Step 4.5: Perform Cross-Attention (Inert)
         aggregated_memory_enrichment = self.cross_attention(
             query_states=query_states,
             memory_states=concatenated_memory_states,
             memory_attention_mask=concatenated_attention_mask,
         )
-        print(
-            f"Aggregated Memory Enrichment | Shape: {aggregated_memory_enrichment.shape} | Mean: {aggregated_memory_enrichment.mean():.4f} | Std: {aggregated_memory_enrichment.std():.4f}"
-        )
 
-        print("------------------------------\n")
-
-        # Return a zero tensor as per the plan for this milestone
-        return torch.zeros_like(hidden_states)
+        return aggregated_memory_enrichment
