@@ -61,7 +61,7 @@ def load_local_gemma():
 def generate_u1(gemini_model) -> str:
     """Generates a unique persona-setting prompt (U1) using the Gemini API."""
     prompt = (
-        "Create a unique and specific persona for an AI assistant. "
+        "Create a unique and specific persona for an AI assistant with an embedded context manager "
         "Describe its name, purpose, and core identity in a single, concise sentence. "
         "The persona should be suitable for an instruction-based model. "
         "Example: 'You are Lyra, an AI assistant designed by Federated Intelligence to answer questions about astrophysics.'"
