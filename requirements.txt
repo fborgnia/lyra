@@ -5,3 +5,6 @@ accelerate
 pytest
 faker
 # Add other dependencies as needed
+# These are used for dataset generation
+google-generativeai
+tqdm
