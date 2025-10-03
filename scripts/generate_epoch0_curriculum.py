@@ -98,9 +98,9 @@ def generate_m2(gemma_model, gemma_tokenizer, u1: str, u2: str) -> str:
     return response_text.strip()
 
 
-def main(num_samples: int):
+def main(num_instructions: int):
     """Main function to generate the training curriculum."""
-    
+
     # 1. Configure APIs and load models
     configure_gemini()
     gemini_model = genai.GenerativeModel(GEMINI_MODEL_NAME)
@@ -109,24 +109,31 @@ def main(num_samples: int):
     # 2. Ensure output directory exists
     os.makedirs(os.path.dirname(OUTPUT_FILE), exist_ok=True)
 
-    # 3. Generate the dataset
-    print(f"\nGenerating {num_samples} samples for the Epoch 0 curriculum...")
-    with open(OUTPUT_FILE, "w") as f:
-        for _ in tqdm(range(num_samples), desc="Generating Samples"):
-            # Generate U1
-            u1 = generate_u1(gemini_model)
+    # 3. Generate the base U1 instructions
+    print(f"\nGenerating {num_instructions} base U1 instructions from Gemini...")
+    u1_instructions = []
+    for _ in tqdm(range(num_instructions), desc="Generating U1 Instructions"):
+        u1 = generate_u1(gemini_model)
+        u1_instructions.append(u1)
+    
+    print(f"Generated {len(u1_instructions)} unique instructions.")
 
-            # Randomly select U2
-            u2 = random.choice(U2_QUESTIONS)
+    # 4. Generate the full dataset by crossing U1s with all U2s
+    total_samples = len(u1_instructions) * len(U2_QUESTIONS)
+    print(f"\nGenerating {total_samples} total samples for the curriculum...")
+    
+    with open(OUTPUT_FILE, "w") as f, tqdm(total=total_samples, desc="Generating Triplets") as pbar:
+        for u1 in u1_instructions:
+            for u2 in U2_QUESTIONS:
+                # Generate M2 using the full context
+                m2 = generate_m2(gemma_model, gemma_tokenizer, u1, u2)
 
-            # Generate M2 using the full context
-            m2 = generate_m2(gemma_model, gemma_tokenizer, u1, u2)
+                # Create the JSONL entry
+                record = {"U1": u1, "U2": u2, "M2": m2}
+                f.write(json.dumps(record) + "\n")
+                pbar.update(1)
 
-            # Create the JSONL entry
-            record = {"U1": u1, "U2": u2, "M2": m2}
-            f.write(json.dumps(record) + "\n")
-
-    print(f"\nSuccessfully generated {num_samples} samples.")
+    print(f"\nSuccessfully generated {total_samples} samples.")
     print(f"Dataset saved to: {OUTPUT_FILE}")
 
 
@@ -138,7 +145,7 @@ if __name__ == "__main__":
         "--num_samples",
         type=int,
         default=1,
-        help="The number of training samples (triplets) to generate.",
+        help="The number of unique U1 instructions to generate. The total number of samples will be this value multiplied by the number of U2 questions.",
     )
     args = parser.parse_args()
     main(args.num_samples)
