@@ -147,14 +147,18 @@ def main():
         print(f"--- Epoch {epoch+1} finished. Average Loss: {avg_epoch_loss:.4f} ---")
 
     print("Training finished.")
+    print("Saving trainable memory module weights...")
+    output_dir = Path(__file__).parent.parent / "models"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    output_path = output_dir / "lyra_memory_heads.pth"
 
-    # --- 7. Save the trained memory head weights (Placeholder) ---
-    # We will implement this properly in a later step
-    # output_dir = Path(__file__).parent.parent / "models" / "lyra_finetuned"
-    # output_dir.mkdir(exist_ok=True)
-    # model.save_pretrained(output_dir)
-    # tokenizer.save_pretrained(output_dir)
-    # print(f"Finetuned Lyra model saved to {output_dir}")
+    # We only want to save the parameters that were trained.
+    trainable_params_dict = {
+        name: param for name, param in model.named_parameters() if param.requires_grad
+    }
+
+    torch.save(trainable_params_dict, output_path)
+    print(f"Finetuned memory weights saved to {output_path}")
 
 if __name__ == "__main__":
     main()

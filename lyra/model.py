@@ -15,6 +15,7 @@ class Lyra(Gemma3ForCausalLM):
     """
     _project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
     DEFAULT_MODEL_PATH = os.path.join(_project_root, 'models/gemma-3-1b-it')
+    DEFAULT_MEMORY_WEIGHTS_PATH = os.path.join(_project_root, 'models', 'lyra_memory_heads.pth')
 
     def __init__(self, pretrained_model_name_or_path=None, *model_args, **kwargs):
         if pretrained_model_name_or_path is None:
@@ -49,8 +50,15 @@ class Lyra(Gemma3ForCausalLM):
                 # 3. Replace the layer's forward method with our custom one
                 layer.forward = types.MethodType(LyraDecoderLayer.forward, layer)
 
-        # Register a forward hook on the final layer norm to capture the last hidden state
-        # This is now handled by the generate wrapper
+        if os.path.exists(self.DEFAULT_MEMORY_WEIGHTS_PATH):
+            print(f"Warning: Weights path found: {self.DEFAULT_MEMORY_WEIGHTS_PATH}")
+            # Load the state dictionary, ensuring it's on the correct device.
+            memory_weights = torch.load(self.DEFAULT_MEMORY_WEIGHTS_PATH, map_location=self.device)
+            # Load the weights into the model. `strict=False` is essential because
+            # we are only loading a subset of the model's parameters (the trained ones).
+            self.load_state_dict(memory_weights, strict=False)
+            print(f"Successfully loaded memory weights from {self.DEFAULT_MEMORY_WEIGHTS_PATH}")
+
         self._freeze_base_model()
     
     def _freeze_base_model(self):
@@ -73,7 +81,7 @@ class Lyra(Gemma3ForCausalLM):
         
         num_trainable = sum(p.numel() for p in self.parameters() if p.requires_grad)
         print(f"Lyra base model frozen. Trainable parameters: {num_trainable}")
-
+    
     def generate(self, *args, **kwargs):
         """
         Wraps the original generate method to handle memory archival.
