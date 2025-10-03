@@ -1,3 +1,4 @@
+import torch
 import torch.nn as nn
 from .store import EpisodicMemoryStore, MemoryPackage
 from .attention import MemoryCrossAttention
@@ -46,11 +47,24 @@ class MemoryInjectionBlock(nn.Module):
         selected_memories = self._select_memories()
 
         if not selected_memories:
-            return hidden_states
+            # Return a zero tensor to maintain a consistent return type
+            return torch.zeros_like(hidden_states)
 
         print("\n--- Memory Injection Block ---")
         print(f"  - Selected {len(selected_memories)} memories for injection.")
         
-        # In the future, we will apply the memories to the hidden_states here
+        # Concatenate memory states and attention masks
+        # The order is preserved from _select_memories, ensuring chronological composition
+        memory_states = [mem[0] for mem in selected_memories]
+        attention_masks = [mem[1] for mem in selected_memories]
+
+        concatenated_memory_states = torch.cat(memory_states, dim=1)
+        concatenated_attention_mask = torch.cat(attention_masks, dim=1)
+
+        print(f"  - Concatenated memory states shape: {concatenated_memory_states.shape}")
+        print(f"  - Concatenated attention mask shape: {concatenated_attention_mask.shape}")
+        
         print("------------------------------\n")
-        return hidden_states
+        
+        # Return a zero tensor as per the plan for this milestone
+        return torch.zeros_like(hidden_states)
