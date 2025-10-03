@@ -1,58 +1,67 @@
-# Lyra: A Gemma-based Language Model with Episodic Memory
+# Lyra: A Gemma-based LLM with In-Layer Episodic Memory
 
-Lyra enhances a standard Gemma instruction-tuned model with an internal episodic memory cache. This allows the model to maintain a persistent, structured memory of conversations, enabling it to recall past information and provide context-aware responses without any external prompt management.
+Lyra is an experimental language model that enhances a standard Gemma instruction-tuned model with a novel, deeply integrated episodic memory system. Instead of managing context by manipulating prompts externally, Lyra injects memory directly into the residual stream of each Transformer decoder layer.
 
-Lyra treats the first conversational turn as a **persistent instruction context**. This initial prompt sets the persona and objective for the entire session, ensuring the model's behavior remains consistent while subsequent turns are stored as retrievable episodic memories.
+This allows the model to be aware of conversational history at every stage of processing, enabling a more nuanced form of context-awareness. The memory modules are designed to be lightweight and trainable via Parameter-Efficient Fine-Tuning (PEFT), leaving the base model's weights entirely frozen.
 
 ## Architecture Overview: How It Works
 
-The core of the project is the `Lyra` model, which subclasses `transformers.Gemma3ForCausalLM`. It integrates a small, trainable `Retriever` module that acts as a semantic search engine over the conversational history.
+The core of Lyra's architecture is the in-place modification of Gemma's decoder layers. During model initialization, each `Gemma3DecoderLayer` is augmented with a `MemoryInjectionBlock`, turning it into a `LyraDecoderLayer`. This is achieved by dynamically replacing the `forward` method of each layer.
 
 ### Key Components:
 
--   **`lyra/model.py` (`Lyra`)**: The main model class. It orchestrates the entire memory process, overriding the `generate()` method to intercept user prompts and manage the memory workflow.
--   **`lyra/retriever.py` (`Retriever`)**: A lightweight, trainable module. Its sole purpose is to find the most semantically relevant memories from the past. It takes a query vector (from the current prompt) and returns the **indices** of the best-matching memories.
--   **`lyra/injection.py` (`MemoryInjectionLayer`)**: The "prompt engineer." It takes the indices provided by the `Retriever`, retrieves the corresponding past conversation turns, and stitches them together with the current prompt to create a single, valid, multi-turn input for the base model.
--   **The Memory Buffer**: Implemented as a simple Python `list` within the `Lyra` class. Each item is a dictionary containing the semantic summary vector and the original `input_ids` of a conversational turn. The first entry (`memory_buffer[0]`) is treated as a special, persistent **instruction context** that is always injected into the prompt.
+-   **`lyra/model.py` (`Lyra`)**: The main model class that subclasses `Gemma3ForCausalLM`. It orchestrates the monkey-patching process and manages the `EpisodicMemoryStore`. It also overrides the `generate()` method to manage the archival of conversational turns.
+-   **`lyra/memory/store.py` (`EpisodicMemoryStore`)**: A session-level cache that stores the `hidden_states` and `attention_mask` of past conversational turns as `MemoryPackage` objects.
+-   **`lyra/memory/layer.py` (`LyraDecoderLayer`)**: Not a class that is instantiated, but a new `forward` method that is injected into each of Gemma's existing decoder layers. It contains the logic for integrating memory into the data path.
+-   **`lyra/memory/injection.py` (`MemoryInjectionBlock`)**: The heart of the memory system. An instance of this block is created for **each decoder layer**. It is responsible for retrieving memories, projecting the current hidden state into a query, and performing cross-attention.
+-   **`lyra/memory/attention.py` (`MemoryCrossAttention`)**: A trainable cross-attention module that calculates attention scores between the current layer's `query_states` and the `hidden_states` of past memories.
 
 ---
 
-## The Inference Loop: A Step-by-Step Guide
+## The Data Flow: A Step-by-Step Guide
 
-When a user calls `model.generate()`:
+When `model.generate()` is called, the following happens at **each decoder layer**:
 
-1.  **Query**: The user's prompt is received.
-2.  **Memory Retrieval (The Retriever's Job)**:
-    *   The `Retriever` searches for the most relevant episodic memories by comparing the current prompt's vector against all memories **except for the first one** (the instruction).
-    *   It returns the indices of the top `k` most relevant memories.
-3.  **Prompt Engineering (The Injection Layer's Job)**:
-    *   The `MemoryInjectionLayer` **always** retrieves the instruction context from `memory_buffer[0]`.
-    *   It then retrieves the top `k` episodic memories identified by the `Retriever`.
-    *   It intelligently concatenates the instruction, the retrieved memories (sorted chronologically), and the current prompt into a single, coherent `input_ids` sequence.
-4.  **Response Generation**:
-    *   This new, memory-infused `input_ids` sequence is passed to the base Gemma model's `generate()` method.
-    *   Gemma generates a response using the full context provided.
-5.  **Memory Storage**:
-    *   **After** the response has been generated, the original prompt from the current turn is processed into a summary vector and stored in the memory buffer, ready for future retrieval. The first turn of a session is stored at index `0` and becomes the permanent instruction.
+1.  **Normalization**: The layer's input `hidden_states` are passed through the standard `input_layernorm`.
+2.  **Memory Branch Activation**:
+    *   A residual connection (`memory_residual`) is created from the normalized `hidden_states`.
+    *   The `MemoryInjectionBlock` for that specific layer is called.
+3.  **Memory Injection**:
+    *   The block retrieves relevant memories (e.g., the first and last turns) from the `EpisodicMemoryStore`.
+    *   It uses its unique, layer-specific `q_proj` layer to project the current `hidden_states` into `query_states`.
+    *   It calls the `MemoryCrossAttention` module, which attends to the selected past memories using the new `query_states`.
+    *   The output is an `aggregated_memory_enrichment` tensor.
+4.  **Residual Connection**:
+    *   The `memory_output` is passed through its own `post_memory_layernorm`.
+    *   The normalized memory is added back to the `memory_residual`.
+5.  **Self-Attention**: This new, memory-infused `hidden_states` tensor is then passed to the original, **frozen** `self_attn` block of the Gemma layer.
+6.  **Archival**: After the full model response is generated, the `Lyra` model takes the final `hidden_states` of the prompt-response pair and stores them in the `EpisodicMemoryStore` for use in subsequent turns.
 
 ---
 
 ## Developer Workflows
 
-### 1. Stage 1 Training: Semantic Alignment
+### 1. Stage 1 Training: Fine-Tuning the Memory Modules
 
-The main training script is `scripts/train_semantic_alignment.py`. It uses a triplet loss function to train **only the `Retriever`'s projection layer**. This teaches the `Retriever` how to map conversational turns to a semantic space where queries and their relevant contexts are close together.
+The training script `scripts/train_memory_heads.py` is used to fine-tune the model. This script employs a PEFT strategy where all of the original Gemma model's parameters are frozen.
+
+Only the newly added memory components are trained:
+- The `q_proj` in each `MemoryInjectionBlock`.
+- The `k_proj`, `v_proj`, and `o_proj` in the `MemoryCrossAttention` module.
+- The `post_memory_layernorm` in each decoder layer.
+
+This teaches the memory system how to generate outputs that the frozen self-attention and FFN layers can interpret, effectively learning to "speak Gemma's language."
 
 ```bash
-# This script trains the Retriever and saves the weights.
-python3 scripts/train_semantic_alignment.py
+# This script will train the new memory modules.
+python3 scripts/train_memory_heads.py
 ```
 
 ### 2. Inference and Usage
 
-To use the model with its memory capabilities, run an inference script like `scripts/test_2_turn.py`. The `Lyra` model will automatically load the trained `semantic_retriever.pth` weights upon initialization.
+To use the model, run an inference script like `scripts/test_cmd_1_turn.py`. The `Lyra` model will use its trained memory modules to provide context-aware responses across multiple turns.
 
 ```bash
-# Run a multi-turn conversation to test memory retrieval.
-python3 scripts/test_2_turn.py
+# Run a multi-turn conversation to test the memory architecture.
+python3 scripts/test_cmd_1_turn.py
 ```
