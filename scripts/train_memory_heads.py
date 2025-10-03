@@ -29,11 +29,9 @@ def process_training_sample(model, tokenizer, sample, device):
 
     # Construct the "past" context (U1 -> M1 acknowledgment)
     # We use a generic acknowledgment as M1.
-    m1_acknowledgment = "Understood."
     
     chat_turn1 = [
-        {"role": "user", "content": sample["U1"]},
-        {"role": "model", "content": m1_acknowledgment}
+        {"role": "user", "content": sample["U1"]}
     ]
     prompt_turn1 = tokenizer.apply_chat_template(chat_turn1, tokenize=False, add_generation_prompt=True)
 
@@ -41,7 +39,7 @@ def process_training_sample(model, tokenizer, sample, device):
     with torch.no_grad():
         inputs_turn1 = tokenizer(prompt_turn1, return_tensors="pt").to(device)
         # We don't need the output, just the side-effect of populating caches for memory
-        model(**inputs_turn1)
+        model.generate(**inputs_turn1, max_new_tokens=50)
 
     # --- Pass 2: Training ---
     # The input for the second pass ONLY contains the new turn (U2) and the
@@ -52,8 +50,6 @@ def process_training_sample(model, tokenizer, sample, device):
         {"role": "model", "content": sample["M2"]},
     ]
     prompt_turn2 = tokenizer.apply_chat_template(chat_turn2, tokenize=False)
-    
-    # Tokenize the full history for the training pass
     inputs_turn2 = tokenizer(prompt_turn2, return_tensors="pt").to(device)
     
     # Run the training forward pass
@@ -88,21 +84,12 @@ def main():
         tokenizer.pad_token = tokenizer.eos_token
     model.to(device)
     print("Lyra model and tokenizer loaded successfully.")
-
-    # --- 5. Freeze base model and configure optimizer ---
-    # Correctly identify trainable parameters based on our new architecture
-    for name, param in model.named_parameters():
-        if 'memory_injection_block' in name:
-            param.requires_grad = True
-        else:
-            param.requires_grad = False
     
     trainable_params = [p for p in model.parameters() if p.requires_grad]
     optimizer = optim.AdamW(trainable_params, lr=learning_rate)
     
     num_trainable_params = sum(p.numel() for p in trainable_params)
     print(f"Optimizer configured. Number of trainable parameters: {num_trainable_params}")
-
 
     # --- 6. The Training Loop (Skeleton) ---
     print(f"Starting training for {num_epochs} epochs...")
