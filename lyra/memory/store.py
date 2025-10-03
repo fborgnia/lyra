@@ -31,3 +31,7 @@ class EpisodicMemoryStore:
     def retrieve_all(self) -> list[MemoryPackage]:
         """Retrieves all memories from the store."""
         return self.memories
+    
+    def clear(self):
+        """Resets the memory store to its initial empty state."""
+        self.memories = []
