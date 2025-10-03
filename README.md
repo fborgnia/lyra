@@ -1,6 +1,6 @@
 # Lyra: A Gemma-based LLM with In-Layer Episodic Memory
 
-Lyra is an experimental language model that enhances a standard Gemma instruction-tuned model with a novel, deeply integrated episodic memory system. Instead of managing context by manipulating prompts externally, Lyra injects memory directly into the residual stream of each Transformer decoder layer.
+Lyra is an experimental language model that enhances a standard Gemma instruction-tuned model with deeply integrated episodic memory system. Instead of managing context by manipulating prompts externally, Lyra injects memory directly into the residual stream of each Transformer decoder layer.
 
 This allows the model to be aware of conversational history at every stage of processing, enabling a more nuanced form of context-awareness. The memory modules are designed to be lightweight and trainable via Parameter-Efficient Fine-Tuning (PEFT), leaving the base model's weights entirely frozen.
 
