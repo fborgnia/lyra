@@ -1,6 +1,6 @@
 # Lyra: A Gemma-based LLM with In-Layer Conversational State Injection
 
-Lyra is an experimental architecture that explores a novel pattern for conversational context management in Transformer-based models. Built upon a standard Gemma instruction-tuned model, Lyra introduces a system for injecting turn-level state directly into the residual stream of each decoder layer.
+Lyra is an experimental architecture that explores a pattern for conversational context management in Transformer-based models. Built upon a standard Gemma instruction-tuned model, Lyra introduces a system for injecting turn-level state directly into the residual stream of each decoder layer.
 
 This approach uses trainable cross-attention modules to process a composite memory block representing all previous conversational turns. This provides historical context at every stage of processing. The design aims to offer an alternative to managing long-term context through ever-growing prompts. The implementation follows a Parameter-Efficient Fine-Tuning (PEFT) strategy, where the base model's weights remain frozen, and only the lightweight state injection components are trained.
 
