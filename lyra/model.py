@@ -33,8 +33,10 @@ class Lyra(Gemma3ForCausalLM):
 
         # Replace the standard attention module with our custom one
         if hasattr(self, 'model') and hasattr(self.model, 'layers'):
-            for layer in self.model.layers:
-                layer.self_attn = LyraAttention(config)
+            for i, layer in enumerate(self.model.layers):
+                original_attn = layer.self_attn
+                layer.self_attn = LyraAttention(config, layer_idx=i)
+                layer.self_attn.load_state_dict(original_attn.state_dict())
 
         self._freeze_base_model()
 
