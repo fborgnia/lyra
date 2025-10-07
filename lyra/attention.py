@@ -132,7 +132,6 @@ class LyraAttention(nn.Module):
         attention_mask: Optional[torch.Tensor],
         past_key_values: Optional[Cache] = None,
         cache_position: Optional[torch.LongTensor] = None,
-        window_size: Optional[int] = 4096,
         **kwargs: Unpack[FlashAttentionKwargs],
     ) -> tuple[torch.Tensor, Optional[torch.Tensor], Optional[tuple[torch.Tensor]]]:
         input_shape = hidden_states.shape[:-1]
@@ -152,13 +151,13 @@ class LyraAttention(nn.Module):
             cache_kwargs = {"sin": sin, "cos": cos, "cache_position": cache_position}
             key_states, value_states = past_key_values.update(key_states, value_states, self.layer_idx, cache_kwargs)
         
-        if window_size is not None and key_states.shape[-2] > window_size:
-            key_states = key_states[..., -window_size:, :]
-            value_states = value_states[..., -window_size:, :]
+        if self.sliding_window is not None and key_states.shape[-2] > self.sliding_window:
+            key_states = key_states[..., -self.sliding_window:, :]
+            value_states = value_states[..., -self.sliding_window:, :]
 
         # Debugging shapes
         #print(f"Query states shape: {query_states.shape}")
-        print(f"Key states shape: {key_states.shape}")
+        #print(f"Key states shape: {key_states.shape}")
         #print(f"Value states shape: {value_states.shape}")
         # For now, we only support the eager implementation.
         attn_output, attn_weights = eager_attention_forward(
