@@ -22,3 +22,12 @@ inputs = model.tokenizer(prompt, return_tensors="pt").to(device)
 outputs = model.generate(**inputs, max_new_tokens=50,)
 full_text = model.tokenizer.decode(outputs[0], skip_special_tokens=False)
 print(f"\n--- Model Output (Turn 0) ---\n{full_text}\n--------------------\n")
+
+# --- Turn 1: Create an instruction to memorize ---
+# This turn's commands an instruction & purpose for the Lyra instance.
+prompt = "<start_of_turn>user\nState your designation and purpose.\n<end_of_turn>\n<start_of_turn>model\n"
+inputs = model.tokenizer(prompt, return_tensors="pt").to(device)
+
+outputs = model.generate(**inputs, max_new_tokens=50,)
+full_text = model.tokenizer.decode(outputs[0], skip_special_tokens=False)
+print(f"\n--- Model Output (Turn 1) ---\n{full_text}\n--------------------\n")
