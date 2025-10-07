@@ -21,9 +21,3 @@
 7.  **Introduce the Sliding Window Cache Logic:** Modify the `LyraAttention.forward` method. The standard implementation accepts an optional `past_key_value` tuple. You will augment this logic. Introduce a `window_size` parameter. When the sequence length of the keys and values in the cache exceeds `window_size`, you will slice the K and V tensors to discard the oldest tokens beyond the window.
 
 8.  **Manage Rotary Embedding Positions:** Crucially, your rotary embeddings must account for the sliding window. The `position_ids` passed to the `RoPE` module must reflect the true position of each token in the sequence, not its index within the truncated cache. You will need to manage and pass the correct `position_ids` during the forward pass, ensuring they increment correctly even as the cache slides.
-
-9.  **Implement Turn-Based Window Expansion:** The initial requirement is for the window to grow with each conversational turn. Create a state management mechanism within the main `Lyra` class (e.g., a simple counter `self.turn_count`). This state will be used to dynamically calculate the `window_size` for the `LyraAttention` modules on each `generate` call. For example: `window_size = initial_window_size + (self.turn_count * turn_increment_size)`.
-
-10. **End-to-End Conversational Test:** Create a new script (e.g., `scripts/test_sliding_window.py`) to validate the entire system. This script should simulate a multi-turn conversation. You will need to manually manage the conversation history and verify that the model can reference information from previous turns that remain within its dynamically expanding window, while correctly handling the state of the KV cache and position IDs across `generate` calls.
-
-Execute this plan in order. Do not proceed to a subsequent step until the current one is complete and verified.
