@@ -47,6 +47,13 @@ def apply_rotary_pos_emb(q, k, cos, sin, position_ids=None, unsqueeze_dim=1):
     k_embed = (k * cos) + (rotate_half(k) * sin)
     return q_embed, k_embed
 
+def apply_rotary_pos_emb_single(x, cos, sin):
+    """Applies Rotary Position Embedding to a single tensor."""
+    cos = cos.unsqueeze(1)
+    sin = sin.unsqueeze(1)
+    x_embed = (x * cos) + (rotate_half(x) * sin)
+    return x_embed
+
 # Copied from transformers.models.gemma3.modeling_gemma3.repeat_kv
 def repeat_kv(hidden_states: torch.Tensor, n_rep: int) -> torch.Tensor:
     batch, num_key_value_heads, slen, head_dim = hidden_states.shape
@@ -145,7 +152,10 @@ class LyraAttention(nn.Module):
         key_states = self.k_norm(key_states)
 
         cos, sin = position_embeddings
-        query_states, key_states = apply_rotary_pos_emb(query_states, key_states, cos, sin)
+        #query_states, key_states = apply_rotary_pos_emb(query_states, key_states, cos, sin)
+
+        query_states = apply_rotary_pos_emb_single(query_states, cos, sin)
+        key_states = apply_rotary_pos_emb_single(key_states, cos, sin)
 
         if past_key_values is not None:
             cache_kwargs = {"sin": sin, "cos": cos, "cache_position": cache_position}
