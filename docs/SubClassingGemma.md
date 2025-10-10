@@ -6,7 +6,7 @@ This document outlines the complexities encountered and the final working soluti
 
 The main objective is to:
 1.  Load a pre-trained `Gemma3ForCausalLM` model.
-2.  Modify its internal decoder layers *in-place* to add custom functionality (the `MemoryInjectionBlock`).
+2.  Modify its internal layers *in-place* to add custom functionality.
 3.  Wrap this entire process within the `Lyra` class's standard `__init__` constructor for ease of use.
 
 ## 2. The `RecursionError`: A Failed Approach
