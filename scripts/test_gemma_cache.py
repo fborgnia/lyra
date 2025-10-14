@@ -112,11 +112,6 @@ def streaming_inference(model, tokenizer, prompts, kv_cache=None, max_gen_len=10
             past_key_values = cache_before_check
         else:
             print("\nRecall FAILED. The model could not retrieve its name.")
-            print("Final effective context size before failure:")
-            for i, (key_cache, value_cache) in enumerate(cache_before_check):
-                is_global = not model.model.layers[i].self_attn.is_sliding
-                layer_type = "Global" if is_global else "Local"
-                print(f"  - Layer {i:02d} ({layer_type}) Cache Length: {key_cache.shape[2]}")
             return cache_before_check # End the test
 
     print("\nAll prompts processed successfully with recall.")
@@ -130,7 +125,7 @@ def main(args):
 
     rope_scaling_config = {
         "type": "linear",
-        "factor": 6  # Increase this factor if you use an even larger window, this seems to apply only to the global heads. without a proper scaling factor they are blind.
+        "factor": 8  # Increase this factor if you use an even larger window, this seems to apply only to the global heads. without a proper scaling factor they are blind.
     }
 
     model = AutoModelForCausalLM.from_pretrained(
