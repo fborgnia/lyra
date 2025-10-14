@@ -4,8 +4,13 @@ warnings.filterwarnings("ignore")
 import torch
 import argparse
 import os
+import sys
 import json
 from transformers import AutoTokenizer, AutoModelForCausalLM
+
+# Add the project root directory to the Python path
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+from lyra.lyra import GemmaInjector
 
 @torch.no_grad()
 def greedy_generate(model, tokenizer, input_ids, past_key_values, max_gen_len):
@@ -26,13 +31,17 @@ def greedy_generate(model, tokenizer, input_ids, past_key_values, max_gen_len):
     generated_ids = [pred_token_idx.item()]
 
     pos = 0
-    for _ in range(max_gen_len - 1):
+    for i in range(max_gen_len - 1):
         outputs = model(
             input_ids=pred_token_idx,
             past_key_values=past_key_values,
             use_cache=True,
         )
         past_key_values = outputs.past_key_values
+        
+        #if past_key_values:
+            #print(f"[Token {i+1}] Cache Length: {past_key_values[0][0].shape[2]}", flush=True)
+
         pred_token_idx = outputs.logits[:, -1, :].argmax(dim=-1).unsqueeze(1)
 
         if pred_token_idx.item() in stop_token_ids:
@@ -106,6 +115,12 @@ def main(args):
     )
     model.eval()
 
+    if args.use_lyra:
+        print("Enabling Lyra injection layer...")
+        injector = GemmaInjector(model)
+        injector.enable()
+        print("Lyra injection layer enabled.")
+
     test_filepath = os.path.join(args.data_root, "mt_bench.jsonl")
     print(f"Loading data from {test_filepath} ...")
     list_data = load_jsonl(test_filepath)
@@ -147,10 +162,12 @@ if __name__ == "__main__":
         "--model_name_or_path", type=str, default="models/gemma-3-1b-it"
     )
     parser.add_argument("--data_root", type=str, default="data/")
-    parser.add_argument("--max_gen_len", type=int, default=1024)
+    parser.add_argument("--max_gen_len", type=int, default=100)
     parser.add_argument("--sliding_window", type=int, default=512, help="Sliding window size for Gemma attention.")
     parser.add_argument("--save_cache_file", type=str, default=None, help="File path to save the final KV cache.")
     parser.add_argument("--load_cache_file", type=str, default=None, help="File path to load an initial KV cache from.")
+    parser.add_argument("--use_lyra", action="store_true", help="Enable the Lyra injection layer.")
+
     args = parser.parse_args()
 
     main(args)
