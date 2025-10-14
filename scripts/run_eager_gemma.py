@@ -51,7 +51,7 @@ def greedy_generate(model, tokenizer, input_ids, past_key_values, max_gen_len):
 
 @torch.no_grad()
 def streaming_inference(model, tokenizer, prompts, kv_cache=None, max_gen_len=1000):
-    past_key_values = None
+    past_key_values = kv_cache
     for idx, prompt in enumerate(prompts):
         # Use the tokenizer's chat template for correct formatting
         message = [{"role": "user", "content": prompt}]
@@ -83,7 +83,7 @@ def streaming_inference(model, tokenizer, prompts, kv_cache=None, max_gen_len=10
         past_key_values = greedy_generate(
             model, tokenizer, input_ids, past_key_values, max_gen_len=max_gen_len
         )
-
+    return past_key_values
 
 def main(args):
     model_name_or_path = args.model_name_or_path
@@ -99,7 +99,7 @@ def main(args):
     model = AutoModelForCausalLM.from_pretrained(
         model_name_or_path,
         attn_implementation="eager",
-        torch_dtype=torch.bfloat16,
+        dtype=torch.bfloat16,
         device_map="auto",
         sliding_window=args.sliding_window,
         rope_scaling=rope_scaling_config,
@@ -114,14 +114,25 @@ def main(args):
         prompts += sample["turns"]
 
     kv_cache = None
+    if args.load_cache_file and os.path.exists(args.load_cache_file):
+        print(f"Loading KV cache from {args.load_cache_file} ...")
+        # Load the entire cache object from the file
+        kv_cache = torch.load(args.load_cache_file, map_location=model.device, weights_only=False)
+        print("KV cache loaded.")
     
-    streaming_inference(
+    final_kv_cache = streaming_inference(
         model,
         tokenizer,
         prompts,
         kv_cache,
         max_gen_len=args.max_gen_len,
     )
+
+    if args.save_cache_file:
+        print(f"Saving final KV cache to {args.save_cache_file} ...")
+        # Save the entire cache object
+        torch.save(final_kv_cache, args.save_cache_file)
+        print("KV cache saved.")
 
 def load_jsonl(file_path):
     list_data_dict = []
@@ -138,6 +149,8 @@ if __name__ == "__main__":
     parser.add_argument("--data_root", type=str, default="data/")
     parser.add_argument("--max_gen_len", type=int, default=1024)
     parser.add_argument("--sliding_window", type=int, default=512, help="Sliding window size for Gemma attention.")
+    parser.add_argument("--save_cache_file", type=str, default=None, help="File path to save the final KV cache.")
+    parser.add_argument("--load_cache_file", type=str, default=None, help="File path to load an initial KV cache from.")
     args = parser.parse_args()
 
     main(args)
