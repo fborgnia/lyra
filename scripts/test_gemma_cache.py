@@ -1,3 +1,12 @@
+"""
+This script is designed to test the effective cache size for gemma.
+It receives a pre-computed KV cache, and runs inferences from mt_bench.jsonl file in data
+after each line, it runs a recall check to see if the model can remember its name "Lyra".
+if it fails, it prints the cache size and exits.
+If it succeeds, it continues until it fails, or reaches the end of the file.
+gemma-3-1b-it seems to be able to recall its name up to 4.8K tokens of context history with a scaling factor of 50
+larger scaling factors don't seem to help.
+"""
 import warnings
 warnings.filterwarnings("ignore")
 
@@ -102,7 +111,7 @@ def streaming_inference(model, tokenizer, prompts, kv_cache=None, max_gen_len=10
         recall_input_ids = tokenizer(recall_model_input, return_tensors="pt").input_ids.to(model.device)
         
         _, recall_response_text = greedy_generate(
-            model, tokenizer, recall_input_ids, past_key_values, max_gen_len=100
+            model, tokenizer, recall_input_ids, past_key_values, max_gen_len=1000
         )
 
         # 3. Validate the response
@@ -125,7 +134,7 @@ def main(args):
 
     rope_scaling_config = {
         "type": "linear",
-        "factor": 8  # Increase this factor if you use an even larger window, this seems to apply only to the global heads. without a proper scaling factor they are blind.
+        "factor": 100  # Increase this factor if you use an even larger window, this seems to apply only to the global heads. without a proper scaling factor they are blind.
     }
 
     model = AutoModelForCausalLM.from_pretrained(
@@ -179,7 +188,7 @@ if __name__ == "__main__":
         "--model_name_or_path", type=str, default="models/gemma-3-1b-it"
     )
     parser.add_argument("--data_root", type=str, default="data/")
-    parser.add_argument("--max_gen_len", type=int, default=1024)
+    parser.add_argument("--max_gen_len", type=int, default=2048)
     parser.add_argument("--sliding_window", type=int, default=512, help="Sliding window size for Gemma attention.")
     parser.add_argument("--save_cache_file", type=str, default=None, help="File path to save the final KV cache.")
     parser.add_argument("--load_cache_file", type=str, default=None, help="File path to load an initial KV cache from.")
