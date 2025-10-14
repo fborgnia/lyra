@@ -73,8 +73,14 @@ def streaming_inference(model, tokenizer, prompts, kv_cache=None, max_gen_len=10
 
         input_shape = input_ids.shape
         print(f"[Info] Input shape: {input_shape}")
-        print(f"[Info] Past Key Values Cache max Size: {past_key_values.get_max_cache_shape() if past_key_values else 0}")
-        print(f"[Info] Past Key Values Cache max Size: {past_key_values.get_max_cache_shape() if past_key_values else 0}")
+        if past_key_values:
+            # Iterate through each layer's cache and print its length
+            for i, (key_cache, value_cache) in enumerate(past_key_values):
+                is_global = not model.model.layers[i].self_attn.is_sliding
+                layer_type = "Global" if is_global else "Local"
+                print(f"  - Layer {i:02d} ({layer_type}) Cache Length: {key_cache.shape[2]}")
+        else:
+            print(f"[Info] Past Key Values Cache length: 0")
         
         # Run the main generation for the current prompt
         past_key_values, _ = greedy_generate(
