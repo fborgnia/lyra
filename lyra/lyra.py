@@ -30,7 +30,7 @@ class GemmaInjector:
             position_ids: Optional[torch.LongTensor] = None,
             past_key_values: Optional[Cache] = None,
             output_attentions: Optional[bool] = False,
-            use_cache: Optional[bool] = False,
+            use_cache: Optional[bool] = True,
             cache_position: Optional[torch.LongTensor] = None,
             **kwargs,
         ) -> tuple[torch.FloatTensor, Optional[tuple[torch.FloatTensor, torch.FloatTensor]]]:
@@ -67,9 +67,10 @@ class GemmaInjector:
             hidden_states = self.post_attention_layernorm(hidden_states)
             hidden_states = residual + hidden_states
 
-            """
             # 2. ---- Injected Lyra Cross-Attention Block ----
             if hasattr(self, 'cross_attn_block'):
+                #kv_cache_copy = torch.load('/home/fede/Projects/Lyra/data/test_kv_cache.pth', weights_only=False)
+                #print(f"[Layer {self.layer_idx}] Injecting Lyra Cross-Attention Block", flush=True)
                 residual = hidden_states
                 # The Lyra block uses the copied cache, which has the correct dimensions
                 # for the attention mask and avoids corrupting the main cache.
@@ -87,7 +88,7 @@ class GemmaInjector:
                 hidden_states = self.post_attention_layernorm(cross_attn_hidden_states)
                 hidden_states = residual + hidden_states
             # ---- End Injected Block ----
-            """
+            
             # 3. Original MLP (Feed-Forward) Block
             #print(f"[Layer {self.layer_idx}] Cache Length Before MLP: {past_key_values[0][0].shape[2] if past_key_values else 0}", flush=True)
             residual = hidden_states
