@@ -1,33 +1,87 @@
-### **Phase 1: Foundational Implementation & Initial Test**
+This is an excellent and ambitious plan. Moving from a sequential block to a parallel, integrated head architecture is a significant step towards a more efficient and powerful model. You've correctly identified all the main challenges: integrating with Grouped-Query Attention (GQA) and correctly handling the two separate contexts (the main growing cache vs. the static loaded cache).
 
-This phase focuses on creating a functional plugin that injects a sequential attention block using the model's existing KV cache.
+Your proposal to pre-calculate and save the attention mask and positional embeddings along with the KV cache is very insightful. It will save significant computation during inference.
 
-**Step 1: Project Scaffolding and Code Duplication**
-1.  Create a new directory named lyra inside your project root Lyra.
-2.  Create a new file `lyra/gemma_components.py`. This file will house the necessary Gemma 3 classes you'll need to modify or instantiate independently.
-3.  From modeling_gemma3.py, copy the following class definitions into `lyra/gemma_components.py`:
-    *   `Gemma3RMSNorm`
-    *   `Gemma3Attention`
-    *   `Gemma3MLP` (if you later decide to inject a full block, but for now `Gemma3Attention` is the priority)
-4.  Create the main plugin file: `lyra/lyra.py`.
+Let's break down how to proceed with a detailed implementation plan.
 
-**Step 2: Create the Plugin's Attention Block**
-1.  In `lyra/lyra.py`, define a new class `InjectedAttentionBlock` that inherits from `torch.nn.Module`.
-2.  The `__init__` method of this class will instantiate a `Gemma3Attention` block (from your `lyra/gemma_components.py` file). It should accept a Gemma 3 configuration object and a layer index to properly initialize the attention block.
-3.  The `forward` method of `InjectedAttentionBlock` will simply call the forward method of its internal `Gemma3Attention` instance, passing through all required arguments like `hidden_states`, `position_embeddings`, `attention_mask`, and `past_key_values`.
+### Understanding the Core Challenge: Grouped-Query Attention (GQA)
 
-**Step 3: Develop the Core Plugin Logic**
-1.  In `lyra/lyra.py`, create the main plugin class, for example, `GemmaInjector`.
-2.  The `__init__` method of `GemmaInjector` will accept a pre-loaded Gemma 3 model instance as an argument.
-3.  Implement a method within `GemmaInjector` called `attach()`. This method will perform the model modification (monkey-patching).
-4.  Inside `attach()`, iterate through the layers of the passed-in model (e.g., `model.model.layers`).
-5.  For each layer, check if it contains a global attention block. You can determine this by inspecting the layer's configuration or a property, like `layer.self_attn.is_sliding` being `False`.
-6.  When a global attention layer is found, instantiate your `InjectedAttentionBlock`.
-7.  Initialize the weights of your new block by deep-copying the weights from the original global attention block in that same layer (`layer.self_attn`). This ensures it starts with the same pre-trained parameters.
-8.  Store the new `InjectedAttentionBlock` instance as a new attribute on the model's layer object (e.g., `layer.injected_attn_block`).
-9.  Modify the `forward` method of the identified `Gemma3DecoderLayer` to include a call to your injected block. The new execution flow within the layer should be: original `self_attn` -> `post_attention_layernorm` -> `residual_add` -> **your `injected_attn_block`**. The output of your block will then feed into the next part of the original layer's logic (the `pre_feedforward_layernorm`).
+Before we can split the heads, we must understand how Gemma-3 uses them. As you noted, it uses GQA.
 
-**Step 4: First Testable Version**
-1.  At this stage, your injected block is using the same `past_key_values` cache as the original attention mechanism because you are passing it through in the modified `forward` method.
-2.  Develop a simple inference script to load the Gemma 3 1B IT model, apply your `GemmaInjector` plugin, and run a text generation task.
-3.  The goal is to verify that the model runs without crashing and to establish a baseline for performance and output quality, which you can use to measure the impact of the sequential injection.
+*   **Standard Multi-Head Attention (MHA):** Every Query head has its own dedicated Key and Value head (e.g., 16 Q heads, 16 K heads, 16 V heads).
+*   **Grouped-Query Attention (GQA):** Multiple Query heads share the same Key and Value head. This saves memory and computation, especially in the KV cache.
+    *   For `gemma-3-1b-it`, the config is: `num_attention_heads: 16`, `num_key_value_heads: 8`.
+    *   This means `num_key_value_groups` is 2 (16 / 8 = 2). Every 2 Query heads share 1 K/V head.
+*   **How it's implemented:** In [`modeling_gemma3.py`]modeling_gemma3.py ), the code projects to the smaller number of K/V heads and then uses `repeat_kv` to expand them to match the number of Query heads right before the attention score calculation.
+
+Our plan to replace half the global heads must respect this grouping. We will replace **8 Q heads** and their corresponding **4 K/V heads**.
+
+---
+
+### Implementation Plan: Parallel Head Integration
+
+Here is a detailed, step-by-step plan to achieve your goal. The most robust way to implement this is to create a new, dedicated `LyraGemma3Attention` class that encapsulates all the complex logic.
+
+#### Step 1: Create the New `LyraGemma3Attention` Class
+
+In [`lyra/lyra.py`]lyra.py ), create a new class that inherits from `Gemma3Attention`. This will be our main workspace.
+
+#### Step 2: Modify the `__init__` Method
+
+The constructor needs to be aware of the head split and load the static Lyra context.
+
+1.  **Resize Original Projections:** The original `q_proj`, `k_proj`, and `v_proj` will now only handle half the heads (the "vanilla" global heads). You will need to resize their weight matrices.
+2.  **Create Lyra Projections:** Add new `lyra_k_proj` and `lyra_v_proj` layers. We can reuse the main `q_proj` for all queries and split the resulting tensor, since the query always comes from the same `hidden_states`.
+3.  **Load and Store Static Context:** In the `__init__` method, load your serialized Lyra context (KV cache, attention mask, and positional embeddings) from files and store them as persistent buffers on the module. This ensures they are moved to the correct device with the model and are only loaded once.
+
+#### Step 3: Re-implement the `forward` Method (The Core Logic)
+
+This is where the parallel processing happens. The `forward` pass of your new `LyraGemma3Attention` class will look like this:
+
+1.  **Project Q, K, V:**
+    *   Calculate the full query states for all heads: `query_states = self.q_proj(hidden_states)`.
+    *   Split the `query_states` tensor along the head dimension into `vanilla_q` and `lyra_q`.
+    *   Calculate the vanilla K/V states for the main context: `vanilla_k = self.k_proj(hidden_states)` and `vanilla_v = self.v_proj(hidden_states)`.
+    *   Calculate the Lyra K/V states. **Crucially, these are also projected from the same input `hidden_states`**: `lyra_k = self.lyra_k_proj(hidden_states)` and `lyra_v = self.lyra_v_proj(hidden_states)`.
+
+2.  **Process Vanilla Heads (Main Growing Context):**
+    *   Apply rotary embeddings to `vanilla_q` and `vanilla_k` using the original `position_embeddings` passed into the function.
+    *   Update the main `past_key_values` cache with the new `vanilla_k` and `vanilla_v`.
+    *   Use `repeat_kv` on the vanilla K/V heads from the cache.
+    *   Calculate attention scores using `vanilla_q`, the repeated vanilla K/V, and the original `attention_mask`.
+    *   Compute the `vanilla_attn_output`.
+
+3.  **Process Lyra Heads (External Static Context):**
+    *   **Apply Static Embeddings:** Apply the pre-loaded `self.lyra_position_embeddings` to `lyra_q` and the newly computed `lyra_k`.
+    *   **Combine Caches:** The final Lyra key/value states for this pass are a combination of the pre-loaded `self.lyra_kv_cache` and the newly computed `lyra_k`/`lyra_v` for the current token.
+    *   Use `repeat_kv` on the combined Lyra K/V heads.
+    *   Calculate attention scores using `lyra_q`, the repeated Lyra K/V, and the pre-loaded `self.lyra_attention_mask`.
+    *   Compute the `lyra_attn_output`.
+
+4.  **Combine and Project:**
+    *   Concatenate the `vanilla_attn_output` and `lyra_attn_output` back into a single tensor along the head dimension.
+    *   Pass this combined tensor through the original `o_proj` layer to get the final output.
+
+#### Step 4: Update the `GemmaInjector`
+
+Your `GemmaInjector` will now be much simpler and cleaner. Instead of replacing the `forward` method of the `Gemma3DecoderLayer`, you will replace the `self_attn` module itself.
+
+```python
+# Inside GemmaInjector.enable()
+for layer in self.model.model.layers:
+    if not layer.self_attn.is_sliding: # Target only global layers
+        # Create an instance of our new attention class
+        lyra_attn_module = LyraGemma3Attention(self.model.config, layer.layer_idx).to(
+            self.model.device, dtype=self.model.dtype
+        )
+        
+        # You will need a custom function to load the weights from the original
+        # block into the resized and new projection layers of your Lyra module.
+        lyra_attn_module.load_weights_from_original(layer.self_attn)
+        
+        # Replace the entire attention module in the layer
+        layer.self_attn = lyra_attn_module
+        print(f"Replaced attention module in layer {layer.layer_idx} with LyraGemma3Attention.")
+```
+
+This approach is far more robust and modular. It cleanly isolates all the complex logic within your new `LyraGemma3Attention` class and leaves the `Gemma3DecoderLayer` untouched, which is a much better software engineering practice. This is the path I strongly recommend for your next milestone.
