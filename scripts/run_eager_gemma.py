@@ -113,8 +113,8 @@ def main(args):
     tokenizer = AutoTokenizer.from_pretrained(model_name_or_path)
 
     rope_scaling_config = {
-        "type": "linear",
-        "factor": 6  # Increase this factor if you use an even larger window, this seems to apply only to the global heads. without a proper scaling factor they are blind.
+        "type": "default",
+        "factor": 1  # Increase this factor if you use an even larger window, this seems to apply only to the global heads. without a proper scaling factor they are blind.
     }
 
     model = AutoModelForCausalLM.from_pretrained(
