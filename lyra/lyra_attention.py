@@ -130,7 +130,7 @@ class LyraGemma3Attention(nn.Module):
             self.register_buffer("lyra_cos", torch.empty(0), persistent=False)
             self.register_buffer("lyra_sin", torch.empty(0), persistent=False)
             self.register_buffer("lyra_attention_mask", torch.empty(0), persistent=False)
-        # --- End Lyra ---
+        # --- End Lyra static context load ---
 
         self.q_proj = nn.Linear(
             config.hidden_size, config.num_attention_heads * self.head_dim, bias=config.attention_bias
@@ -144,11 +144,13 @@ class LyraGemma3Attention(nn.Module):
         self.o_proj = nn.Linear(
             config.num_attention_heads * self.head_dim, config.hidden_size, bias=config.attention_bias
         )
+
         self.attn_logit_softcapping = self.config.attn_logit_softcapping
         self.sliding_window = config.sliding_window if self.is_sliding else None
 
         self.q_norm = Gemma3RMSNorm(dim=config.head_dim, eps=config.rms_norm_eps)
         self.k_norm = Gemma3RMSNorm(dim=config.head_dim, eps=config.rms_norm_eps)
+
 
     @deprecate_kwarg("past_key_value", new_name="past_key_values", version="4.58")
     def forward(
@@ -160,39 +162,107 @@ class LyraGemma3Attention(nn.Module):
         cache_position: Optional[torch.LongTensor] = None,
         **kwargs: Unpack[FlashAttentionKwargs],
     ) -> tuple[torch.Tensor, Optional[torch.Tensor], Optional[tuple[torch.Tensor]]]:
-        input_shape = hidden_states.shape[:-1]
-        hidden_shape = (*input_shape, -1, self.head_dim)
+        
+        bsz, q_len, _ = hidden_states.shape
+        
+        # 1. Project Q, K, V using original, full-size layers
+        query_states = self.q_proj(hidden_states)
+        key_states = self.k_proj(hidden_states)
+        value_states = self.v_proj(hidden_states)
 
-        query_states = self.q_proj(hidden_states).view(hidden_shape).transpose(1, 2)
-        key_states = self.k_proj(hidden_states).view(hidden_shape).transpose(1, 2)
-        value_states = self.v_proj(hidden_states).view(hidden_shape).transpose(1, 2)
+        # Reshape and transpose for attention calculation
+        query_states = query_states.view(bsz, q_len, self.config.num_attention_heads, self.head_dim).transpose(1, 2)
+        key_states = key_states.view(bsz, q_len, self.config.num_key_value_heads, self.head_dim).transpose(1, 2)
+        value_states = value_states.view(bsz, q_len, self.config.num_key_value_heads, self.head_dim).transpose(1, 2)
 
+        # 2. Apply Normalization to full tensors
         query_states = self.q_norm(query_states)
         key_states = self.k_norm(key_states)
 
+        # 3. Split the tensors into two streams
+        vanilla_q, lyra_q = torch.chunk(query_states, 2, dim=1)
+        vanilla_k_states, lyra_k_states = torch.chunk(key_states, 2, dim=1)
+        vanilla_v_states, lyra_v_states = torch.chunk(value_states, 2, dim=1)
+
+        # --- 4. Process Vanilla Heads (Main Growing Context) ---
+        
+        # Apply RoPE using dynamic position embeddings
         cos, sin = position_embeddings
-        query_states, key_states = apply_rotary_pos_emb(query_states, key_states, cos, sin)
+        vanilla_q, vanilla_k_states_with_rope = apply_rotary_pos_emb(vanilla_q, vanilla_k_states, cos, sin)
 
+        # Update the main KV cache
         if past_key_values is not None:
-            cache_kwargs = {"sin": sin, "cos": cos, "cache_position": cache_position}
-            key_states, value_states = past_key_values.update(key_states, value_states, self.layer_idx, cache_kwargs)
+            # The cache object expects the full K/V tensors. We only update the vanilla part.
+            # We pass the vanilla K/V states with RoPE applied, and the original vanilla V states.
+            # The Lyra part is filled with zeros as it's not part of the main cache.
+            zero_k = torch.zeros_like(lyra_k_states)
+            zero_v = torch.zeros_like(lyra_v_states)
+            
+            # We must apply RoPE to the vanilla_k_states before caching
+            full_k_to_cache = torch.cat([vanilla_k_states_with_rope, zero_k], dim=1)
+            full_v_to_cache = torch.cat([vanilla_v_states, zero_v], dim=1)
 
+            cache_kwargs = {"sin": sin, "cos": cos, "cache_position": cache_position}
+            # The `update` method returns the full cache including past keys
+            full_k_from_cache, full_v_from_cache = past_key_values.update(full_k_to_cache, full_v_to_cache, self.layer_idx, cache_kwargs)
+            
+            # We only need the vanilla part from the full cache for this stream's attention
+            vanilla_k_states, _ = torch.chunk(full_k_from_cache, 2, dim=1)
+            vanilla_v_states, _ = torch.chunk(full_v_from_cache, 2, dim=1)
+        else:
+             # if no cache, the k states are the ones with rope applied
+             vanilla_k_states = vanilla_k_states_with_rope
+
+        # Determine attention implementation
         attention_interface: Callable = eager_attention_forward
         if self.config._attn_implementation != "eager":
             attention_interface = ALL_ATTENTION_FUNCTIONS[self.config._attn_implementation]
 
-        attn_output, attn_weights = attention_interface(
+        # Calculate attention for the vanilla stream
+        vanilla_attn_output, vanilla_attn_weights = attention_interface(
             self,
-            query_states,
-            key_states,
-            value_states,
+            vanilla_q,
+            vanilla_k_states,
+            vanilla_v_states,
             attention_mask,
             dropout=self.attention_dropout if self.training else 0.0,
             scaling=self.scaling,
-            sliding_window=self.sliding_window,
             **kwargs,
         )
 
-        attn_output = attn_output.reshape(*input_shape, -1).contiguous()
-        attn_output = self.o_proj(attn_output)
-        return attn_output, attn_weights
+        # --- 5. Process Lyra Heads (Static Context) ---
+
+        # Apply RoPE using pre-loaded static position embeddings
+        lyra_q, lyra_k_states = apply_rotary_pos_emb(lyra_q, lyra_k_states, self.lyra_cos, self.lyra_sin)
+
+        # Combine static cache with current token's K/V
+        # Note: We need to expand the batch dimension of the cache to match the input batch size
+        lyra_k_cache_expanded = self.lyra_key_cache.expand(bsz, -1, -1, -1)
+        lyra_v_cache_expanded = self.lyra_value_cache.expand(bsz, -1, -1, -1)
+        lyra_k_states = torch.cat([lyra_k_cache_expanded, lyra_k_states], dim=2)
+        lyra_v_states = torch.cat([lyra_v_cache_expanded, lyra_v_states], dim=2)
+
+        # Calculate attention for the Lyra stream
+        lyra_attn_output, _ = attention_interface(
+            self,
+            lyra_q,
+            lyra_k_states,
+            lyra_v_states,
+            self.lyra_attention_mask, # Use the static mask
+            dropout=self.attention_dropout if self.training else 0.0,
+            scaling=self.scaling,
+            **kwargs,
+        )
+
+        # --- 6. Combine and Project ---
+        
+        # Concatenate the outputs of the two streams along the head dimension
+        combined_attn_output = torch.cat([vanilla_attn_output, lyra_attn_output], dim=1)
+        
+        # Reshape and apply the final output projection
+        combined_attn_output = combined_attn_output.transpose(1, 2).contiguous()
+        combined_attn_output = combined_attn_output.reshape(bsz, q_len, -1)
+        attn_output = self.o_proj(combined_attn_output)
+
+        # Return the final output and the attention weights from the vanilla stream for inspection
+        return attn_output, vanilla_attn_weights
