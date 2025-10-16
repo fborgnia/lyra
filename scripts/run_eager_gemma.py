@@ -136,7 +136,7 @@ def main(args):
     hook_handle = None
     if args.save_cache_file:
         print("Registering capture hook on the first decoder layer...")
-        hook_handle = model.model.layers[0].register_forward_hook(capture_hook, with_kwargs=True)
+        hook_handle = model.model.layers[5].register_forward_hook(capture_hook, with_kwargs=True)
 
     test_filepath = os.path.join(args.data_root, "mt_bench.jsonl")
     print(f"Loading data from {test_filepath} ...")

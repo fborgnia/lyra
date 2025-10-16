@@ -12,14 +12,14 @@ class GemmaInjector:
         Replaces the self-attention module in global attention layers of the Gemma
         model with a custom implementation (LyraGemma3Attention).
         """
-        print("Starting baseline injection of LyraGemma3Attention...")
+        print("Injecting LyraGemma3Attention...")
+        #print(f"model config: {self.model.config}")
         for layer in self.model.model.layers:
             # Target only the global attention layers
             if not layer.self_attn.is_sliding:
-                
                 # 1. Create an instance of our custom attention class
                 lyra_attn_module = LyraGemma3Attention(
-                    config=layer.self_attn.config, 
+                    config=self.model.config, # Use the correct, full config object
                     layer_idx=layer.layer_idx
                 ).to(self.model.device, dtype=self.model.dtype)
                 
