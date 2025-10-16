@@ -12,6 +12,18 @@ from transformers import AutoTokenizer, AutoModelForCausalLM
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from lyra.lyra import GemmaInjector
 
+captured_tensors = {}
+
+def capture_hook(module, args, kwargs, output):
+    """A forward hook to capture specific inputs to a decoder layer."""
+    # We capture the tensors from the keyword arguments of the layer's forward call
+    if "attention_mask" in kwargs:
+        captured_tensors["attention_mask"] = kwargs["attention_mask"].cpu()
+    if "position_embeddings_global" in kwargs:
+        # position_embeddings are a tuple of (cos, sin)
+        cos, sin = kwargs["position_embeddings_global"]
+        captured_tensors["position_embeddings"] = (cos.cpu(), sin.cpu())
+
 @torch.no_grad()
 def greedy_generate(model, tokenizer, input_ids, past_key_values, max_gen_len):
     # Define stop tokens for Gemma
@@ -120,6 +132,11 @@ def main(args):
         injector = GemmaInjector(model)
         injector.enable()
         print("Lyra injection layer enabled.")
+    
+    hook_handle = None
+    if args.save_cache_file:
+        print("Registering capture hook on the first decoder layer...")
+        hook_handle = model.model.layers[0].register_forward_hook(capture_hook, with_kwargs=True)
 
     test_filepath = os.path.join(args.data_root, "mt_bench.jsonl")
     print(f"Loading data from {test_filepath} ...")
@@ -132,7 +149,8 @@ def main(args):
     if args.load_cache_file and os.path.exists(args.load_cache_file):
         print(f"Loading KV cache from {args.load_cache_file} ...")
         # Load the entire cache object from the file
-        kv_cache = torch.load(args.load_cache_file, map_location=model.device, weights_only=False)
+        loaded_data = torch.load(args.load_cache_file, map_location=model.device, weights_only=False)
+        kv_cache = loaded_data["kv_cache"]
         print("KV cache loaded.")
     
     final_kv_cache = streaming_inference(
@@ -143,11 +161,25 @@ def main(args):
         max_gen_len=args.max_gen_len,
     )
 
+    if hook_handle:
+        hook_handle.remove()
+        print("Capture hook removed.")
+
     if args.save_cache_file:
-        print(f"Saving final KV cache to {args.save_cache_file} ...")
-        # Save the entire cache object
-        torch.save(final_kv_cache, args.save_cache_file)
-        print("KV cache saved.")
+        print(f"Saving final KV cache and context to {args.save_cache_file} ...")
+        
+        data_to_save = {
+            "kv_cache": final_kv_cache,
+            "attention_mask": captured_tensors.get("attention_mask"),
+            "position_embeddings": captured_tensors.get("position_embeddings")
+        }
+        
+        # Verify that we captured the tensors
+        if data_to_save["attention_mask"] is None or data_to_save["position_embeddings"] is None:
+            print("Warning: Failed to capture attention_mask or position_embeddings.")
+
+        torch.save(data_to_save, args.save_cache_file)
+        print("KV cache and context saved.")
 
 def load_jsonl(file_path):
     list_data_dict = []
