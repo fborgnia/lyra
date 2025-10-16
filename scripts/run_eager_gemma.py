@@ -162,7 +162,7 @@ if __name__ == "__main__":
         "--model_name_or_path", type=str, default="models/gemma-3-1b-it"
     )
     parser.add_argument("--data_root", type=str, default="data/")
-    parser.add_argument("--max_gen_len", type=int, default=100)
+    parser.add_argument("--max_gen_len", type=int, default=512)
     parser.add_argument("--sliding_window", type=int, default=512, help="Sliding window size for Gemma attention.")
     parser.add_argument("--save_cache_file", type=str, default=None, help="File path to save the final KV cache.")
     parser.add_argument("--load_cache_file", type=str, default=None, help="File path to load an initial KV cache from.")
