@@ -10,8 +10,7 @@ class GemmaInjector:
     def enable(self):
         """
         Replaces the self-attention module in global attention layers of the Gemma
-        model with an identical, custom implementation (LyraGemma3Attention).
-        This serves as a baseline for further modifications.
+        model with a custom implementation (LyraGemma3Attention).
         """
         print("Starting baseline injection of LyraGemma3Attention...")
         for layer in self.model.model.layers:

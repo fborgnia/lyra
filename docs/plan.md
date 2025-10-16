@@ -24,43 +24,56 @@ Here is a detailed, step-by-step plan to achieve your goal. The most robust way 
 
 #### Step 1: Create the New `LyraGemma3Attention` Class
 
-In [`lyra/lyra.py`]lyra.py ), create a new class that inherits from `Gemma3Attention`. This will be our main workspace.
+In [`lyra/lyra.py`]lyra.py ), create a new identical class that replaces `Gemma3Attention`. This will be our main workspace. its functionality is exactly as the original gemma model.
 
 #### Step 2: Modify the `__init__` Method
 
-The constructor needs to be aware of the head split and load the static Lyra context.
+The normalization layers (`q_norm`, `k_norm`) operate on a per-head basis. Since the head dimension (`head_dim`) is the same for all heads, **we do not need to split the normalization layers themselves.** We can create them once and apply them to both the vanilla and Lyra streams.
 
-1.  **Resize Original Projections:** The original `q_proj`, `k_proj`, and `v_proj` will now only handle half the heads (the "vanilla" global heads). You will need to resize their weight matrices.
-2.  **Create Lyra Projections:** Add new `lyra_k_proj` and `lyra_v_proj` layers. We can reuse the main `q_proj` for all queries and split the resulting tensor, since the query always comes from the same `hidden_states`.
-3.  **Load and Store Static Context:** In the `__init__` method, load your serialized Lyra context (KV cache, attention mask, and positional embeddings) from files and store them as persistent buffers on the module. This ensures they are moved to the correct device with the model and are only loaded once.
+1.  **Keep `q_proj` as is:** The original `q_proj` layer remains unchanged.
+2.  **Split K/V Projections:** Create separate projection layers for the vanilla and Lyra K/V heads.
+    *   `self.vanilla_k_proj`, `self.vanilla_v_proj`
+    *   `self.lyra_k_proj`, `self.lyra_v_proj`
+3.  **Create Normalization Layers:** Instantiate `q_norm` and `k_norm` exactly as they are in the original `Gemma3Attention`.
+    *   `self.q_norm = Gemma3RMSNorm(dim=self.head_dim, ...)`
+    *   `self.k_norm = Gemma3RMSNorm(dim=self.head_dim, ...)`
+4.  **Load Static Context:** This remains the same. Load the Lyra KV cache, mask, and embeddings as persistent buffers.
 
 #### Step 3: Re-implement the `forward` Method (The Core Logic)
 
+Normalization is applied *after* the linear projection but *before* the rotary position embeddings are applied.
 This is where the parallel processing happens. The `forward` pass of your new `LyraGemma3Attention` class will look like this:
 
 1.  **Project Q, K, V:**
-    *   Calculate the full query states for all heads: `query_states = self.q_proj(hidden_states)`.
-    *   Split the `query_states` tensor along the head dimension into `vanilla_q` and `lyra_q`.
-    *   Calculate the vanilla K/V states for the main context: `vanilla_k = self.k_proj(hidden_states)` and `vanilla_v = self.v_proj(hidden_states)`.
-    *   Calculate the Lyra K/V states. **Crucially, these are also projected from the same input `hidden_states`**: `lyra_k = self.lyra_k_proj(hidden_states)` and `lyra_v = self.lyra_v_proj(hidden_states)`.
+    *   Calculate the full query states: `query_states = self.q_proj(hidden_states)`.
+    *   Calculate the separate K/V states:
+        *   `vanilla_k = self.vanilla_k_proj(hidden_states)`
+        *   `lyra_k = self.lyra_k_proj(hidden_states)`
+        *   (and the same for `v_proj`)
 
-2.  **Process Vanilla Heads (Main Growing Context):**
-    *   Apply rotary embeddings to `vanilla_q` and `vanilla_k` using the original `position_embeddings` passed into the function.
-    *   Update the main `past_key_values` cache with the new `vanilla_k` and `vanilla_v`.
-    *   Use `repeat_kv` on the vanilla K/V heads from the cache.
-    *   Calculate attention scores using `vanilla_q`, the repeated vanilla K/V, and the original `attention_mask`.
-    *   Compute the `vanilla_attn_output`.
+2.  **Apply Normalization:**
+    *   Normalize the full query tensor: `query_states = self.q_norm(query_states)`.
+    *   Normalize each of the key tensors separately using the *same* `k_norm` layer:
+        *   `vanilla_k = self.k_norm(vanilla_k)`
+        *   `lyra_k = self.k_norm(lyra_k)`
+    *   (Note: The value states are not normalized in the Gemma architecture).
 
-3.  **Process Lyra Heads (External Static Context):**
-    *   **Apply Static Embeddings:** Apply the pre-loaded `self.lyra_position_embeddings` to `lyra_q` and the newly computed `lyra_k`.
-    *   **Combine Caches:** The final Lyra key/value states for this pass are a combination of the pre-loaded `self.lyra_kv_cache` and the newly computed `lyra_k`/`lyra_v` for the current token.
-    *   Use `repeat_kv` on the combined Lyra K/V heads.
-    *   Calculate attention scores using `lyra_q`, the repeated Lyra K/V, and the pre-loaded `self.lyra_attention_mask`.
-    *   Compute the `lyra_attn_output`.
+3.  **Split Q:**
+    *   Use `torch.chunk` or slicing to divide the normalized `query_states` into `vanilla_q` and `lyra_q`.
 
-4.  **Combine and Project:**
-    *   Concatenate the `vanilla_attn_output` and `lyra_attn_output` back into a single tensor along the head dimension.
-    *   Pass this combined tensor through the original `o_proj` layer to get the final output.
+4.  **Process Vanilla Heads (Main Growing Context):**
+    *   Apply rotary embeddings to `vanilla_q` and `vanilla_k` using the original `position_embeddings`.
+    *   Update the main `past_key_values` cache.
+    *   Calculate attention scores and `vanilla_attn_output`.
+
+5.  **Process Lyra Heads (External Static Context):**
+    *   Apply the pre-loaded `self.lyra_position_embeddings` to `lyra_q` and `lyra_k`.
+    *   Combine the pre-loaded `self.lyra_kv_cache` with the new `lyra_k`/`lyra_v`.
+    *   Calculate attention scores and `lyra_attn_output`.
+
+6.  **Combine and Project:**
+    *   Concatenate `vanilla_attn_output` and `lyra_attn_output`.
+    *   Pass the result through the `o_proj` layer.
 
 #### Step 4: Update the `GemmaInjector`
 

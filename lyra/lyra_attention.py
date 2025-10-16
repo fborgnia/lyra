@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 from typing import Optional, Callable
+import os
 
 from transformers.models.gemma3.configuration_gemma3 import Gemma3TextConfig
 from transformers.cache_utils import Cache
@@ -99,6 +100,37 @@ class LyraGemma3Attention(nn.Module):
         self.scaling = config.query_pre_attn_scalar**-0.5
         self.attention_dropout = self.config.attention_dropout
         self.is_causal = True
+
+        # --- Lyra: Load static context ---
+        lyra_context_path = "data/test_kv_cache_with_p_m.pth"
+        if os.path.exists(lyra_context_path):
+            print(f"Layer {self.layer_idx}: Loading Lyra context from {lyra_context_path}...")
+            # Load to cuda first to avoid device mismatches during model loading
+            loaded_data = torch.load(lyra_context_path, map_location="cuda", weights_only=False)
+
+            # The loaded kv_cache is a DynamicCache object (list of tuples)
+            # We extract the key and value tensors for this specific layer
+            lyra_k, lyra_v = loaded_data["kv_cache"][self.layer_idx]
+            self.register_buffer("lyra_key_cache", lyra_k, persistent=False)
+            self.register_buffer("lyra_value_cache", lyra_v, persistent=False)
+
+            # The position embeddings are a tuple of (cos, sin)
+            lyra_cos, lyra_sin = loaded_data["position_embeddings"]
+            self.register_buffer("lyra_cos", lyra_cos, persistent=False)
+            self.register_buffer("lyra_sin", lyra_sin, persistent=False)
+
+            # The attention mask is a single tensor
+            self.register_buffer("lyra_attention_mask", loaded_data["attention_mask"], persistent=False)
+            print(f"Layer {self.layer_idx}: Lyra context loaded successfully.")
+        else:
+            print(f"Warning: Lyra context file not found at {lyra_context_path}. Lyra heads will not function.")
+            # Register empty buffers so the module doesn't crash if the file is missing
+            self.register_buffer("lyra_key_cache", torch.empty(0), persistent=False)
+            self.register_buffer("lyra_value_cache", torch.empty(0), persistent=False)
+            self.register_buffer("lyra_cos", torch.empty(0), persistent=False)
+            self.register_buffer("lyra_sin", torch.empty(0), persistent=False)
+            self.register_buffer("lyra_attention_mask", torch.empty(0), persistent=False)
+        # --- End Lyra ---
 
         self.q_proj = nn.Linear(
             config.hidden_size, config.num_attention_heads * self.head_dim, bias=config.attention_bias
