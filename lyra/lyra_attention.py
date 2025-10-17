@@ -11,6 +11,7 @@ from transformers.processing_utils import Unpack
 from transformers.utils import logging
 from transformers.utils.deprecation import deprecate_kwarg
 from transformers.modeling_utils import ALL_ATTENTION_FUNCTIONS
+from transformers.masking_utils import create_causal_mask
 
 logger = logging.get_logger(__name__)
 
@@ -62,6 +63,8 @@ class LyraGemma3Attention(nn.Module):
         self.is_sliding = config.layer_types[layer_idx] == "sliding_attention"
         self.config = config
         self.layer_idx = layer_idx
+
+        self.lyra_rotary_emb = Gemma3RotaryEmbedding(config=config)
         
         self.num_attention_heads = config.num_attention_heads
         self.num_key_value_heads = config.num_key_value_heads
@@ -77,35 +80,7 @@ class LyraGemma3Attention(nn.Module):
         # 'You are lyra, an assistant that helps with XYZ...'
         # We are trying to inject this context into a portion of the attention heads, and try to see it in the output.
         # --- Load Lyra static context into a DynamicCache ---
-        self.lyra_cache = None
-        lyra_context_path = "data/test_kv_cache_with_p_m.pth"
-        if os.path.exists(lyra_context_path):
-            print(f"Layer {self.layer_idx}: Loading Lyra context from {lyra_context_path}...")
-            
-            # Load the entire DynamicCache object.
-            loaded_data = torch.load(lyra_context_path, map_location="cuda", weights_only=False)
-            self.lyra_cache = loaded_data["kv_cache"]
-            
-            # Ensure the loaded cache is configured for the Lyra stream (half heads)
-            # This is a safeguard; the saved cache should already have this config.
-            #if self.lyra_cache.key_cache[self.layer_idx].shape[1] != self.num_key_value_heads:
-            #     print(f"Warning: Layer {self.layer_idx} Lyra cache head count mismatch. Reconfiguring.")
-            #     lyra_config = config.__class__(**config.to_dict())
-            #     lyra_config.num_attention_heads = self.num_attention_heads // 2
-            #     self.lyra_cache.config = lyra_config
-
-            print(f"Layer {self.layer_idx}: Lyra context loaded successfully into DynamicCache.")
-            # --- DIAGNOSTICS ---
-            is_global_str = "Global" if not self.is_sliding else "Sliding"
-            print(f"-> DIAGNOSTIC (Layer {self.layer_idx} - {is_global_str}):")
-            print(f"   - Loaded Lyra KV cache sequence length: {self.lyra_cache.get_seq_length(self.layer_idx)}")
             # --- END DIAGNOSTICS ---
-        else:
-            print(f"Warning: Lyra context file not found at {lyra_context_path}.")
-            # If no static context, initialize an empty cache for Lyra
-            lyra_config = config.__class__(**config.to_dict())
-            lyra_config.num_attention_heads = self.num_attention_heads // 2
-            self.lyra_cache = DynamicCache(config=lyra_config)
         # --- End Lyra static context load ---
         
         self.q_proj = nn.Linear(
@@ -168,20 +143,16 @@ class LyraGemma3Attention(nn.Module):
         position_embeddings: torch.Tensor,
         attention_mask: Optional[torch.Tensor],
         past_key_values: Optional[Cache] = None,
+        lyra_past_key_values: Optional[Cache] = None,
         cache_position: Optional[torch.LongTensor] = None,
         **kwargs: Unpack[FlashAttentionKwargs],
     ) -> tuple[torch.Tensor, Optional[torch.Tensor], Optional[tuple[torch.Tensor]]]:
+
+        
+        self.lyra_cache = lyra_past_key_values
+        ##print(f"   - Loaded Lyra KV cache sequence length: {self.lyra_cache.get_seq_length(self.layer_idx)}")
         
         bsz, q_len, _ = hidden_states.shape
-
-        # During multi-turn generation, we need to use a fresh copy of the pre-filled Lyra
-        # cache for each new user prompt to avoid contaminating it with the previous turn's state.
-        if q_len > 1 and self.lyra_cache is not None:
-             # This is a simplified way to reset. For true multi-turn, you might manage this outside.
-             lyra_context_path = "data/test_kv_cache_with_p_m.pth"
-             if os.path.exists(lyra_context_path):
-                loaded_data = torch.load(lyra_context_path, map_location="cuda", weights_only=False)
-                self.lyra_cache = loaded_data["kv_cache"]
 
         # 1. Project Q, K, V (Once)
         query_states = self.q_proj(hidden_states)
@@ -233,16 +204,43 @@ class LyraGemma3Attention(nn.Module):
 
         # --- 4. Process Lyra Stream (Static + Dynamic Context) ---
 
-        # Apply RoPE to Lyra's query.
-        lyra_q_rope, _ = apply_rotary_pos_emb(lyra_q, key_states, cos, sin)
-
         # Update the Lyra cache. It will handle RoPE for the keys and append them.
         # We need to calculate the correct cache_position for the Lyra cache.
         lyra_past_len = self.lyra_cache.get_seq_length(self.layer_idx)
         lyra_cache_position = torch.arange(lyra_past_len, lyra_past_len + q_len, device=hidden_states.device)
+        lyra_position_ids = lyra_cache_position.unsqueeze(0)
+        lyra_cos, lyra_sin = self.lyra_rotary_emb(hidden_states, lyra_position_ids)
+
+        #print(f"Layer {self.layer_idx} PRE-UPDATE: Lyra_cos shape: {lyra_cos.shape}")
         
-        lyra_cache_kwargs = {"sin": sin, "cos": cos, "cache_position": lyra_cache_position}
+        # Apply RoPE to Lyra's query.
+        lyra_q_rope, _ = apply_rotary_pos_emb(lyra_q, key_states, lyra_cos, lyra_sin)
+        
+        lyra_cache_kwargs = {"sin": lyra_sin, "cos": lyra_cos, "cache_position": lyra_cache_position}
+
+        # --- DIAGNOSTICS: Check cache state before update ---
+        #print(f"Layer {self.layer_idx} PRE-UPDATE: Lyra cache seq_len: {self.lyra_cache.get_seq_length(self.layer_idx)}")
+        
+        #print(f"Layer {self.layer_idx} MASK_INPUTS: hidden_states.shape: {hidden_states.shape}")
+        #print(f"Layer {self.layer_idx} MASK_INPUTS: lyra_cache_position: {lyra_cache_position}")
+        #print(f"Layer {self.layer_idx} MASK_INPUTS: is_sliding: {self.is_sliding}")
+
+        kv_length, kv_offset = self.lyra_cache.get_mask_sizes(lyra_cache_position, self.layer_idx)
+        #print(f"Layer {self.layer_idx} LAYER INFO FROM CACHE: kv_length: {kv_length}, kv_offset: {kv_offset}")    
+
+        lyra_attention_mask = create_causal_mask(
+            config=self.config,
+            input_embeds=hidden_states,
+            attention_mask=None,  # The original padding mask
+            cache_position=lyra_cache_position,
+            past_key_values=self.lyra_cache,
+            position_ids=lyra_position_ids,
+        )
+        #print(f"Layer {self.layer_idx} PRE-UPDATE: Lyra attention mask: {lyra_attention_mask.shape}")
         lyra_k_full, lyra_v_full = self.lyra_cache.update(key_states, value_states, self.layer_idx, lyra_cache_kwargs)
+        #print(f"Layer {self.layer_idx} POST-UPDATE: Lyra K full shape: {lyra_k_full.shape}, Lyra V full shape: {lyra_v_full.shape}")
+
+        
 
         # Calculate attention for the Lyra stream.
         # The main `attention_mask` will be correctly sliced by the attention function.
@@ -250,7 +248,7 @@ class LyraGemma3Attention(nn.Module):
             query=lyra_q_rope,
             key=lyra_k_full,
             value=lyra_v_full,
-            attention_mask=attention_mask,
+            attention_mask=lyra_attention_mask,
             num_key_value_groups=stream_num_key_value_groups,
             dropout=self.attention_dropout if self.training else 0.0,
             scaling=self.scaling,

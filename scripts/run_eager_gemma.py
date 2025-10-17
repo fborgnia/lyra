@@ -13,7 +13,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 from lyra.lyra import GemmaInjector
 
 @torch.no_grad()
-def greedy_generate(model, tokenizer, input_ids, past_key_values, max_gen_len):
+def greedy_generate(model, tokenizer, input_ids, past_key_values, lyra_past_key_values, max_gen_len):
     # Define stop tokens for Gemma
     stop_token_ids = {
         tokenizer.eos_token_id,
@@ -23,6 +23,7 @@ def greedy_generate(model, tokenizer, input_ids, past_key_values, max_gen_len):
     outputs = model(
         input_ids=input_ids,
         past_key_values=past_key_values,
+        lyra_past_key_values=lyra_past_key_values,
         use_cache=True,
     )
     past_key_values = outputs.past_key_values
@@ -35,6 +36,7 @@ def greedy_generate(model, tokenizer, input_ids, past_key_values, max_gen_len):
         outputs = model(
             input_ids=pred_token_idx,
             past_key_values=past_key_values,
+            lyra_past_key_values=lyra_past_key_values,
             use_cache=True,
         )
         past_key_values = outputs.past_key_values
@@ -90,7 +92,7 @@ def streaming_inference(model, tokenizer, prompts, kv_cache=None, lyra_kv_cache=
         #print(f"[Info] Past Key Values Cache length: {past_key_values[0][0].shape[2] if past_key_values else 0}")
         
         past_key_values = greedy_generate(
-            model, tokenizer, input_ids, past_key_values, max_gen_len=max_gen_len
+            model, tokenizer, input_ids, past_key_values, lyra_kv_cache, max_gen_len=max_gen_len
         )
     return past_key_values
 
@@ -140,6 +142,8 @@ def main(args):
         # Load the entire cache object from the file
         lyra_kv_cache = torch.load(args.lyra_cache_file, map_location=model.device, weights_only=False)
         print("Lyra KV cache loaded.")
+    else:
+        lyra_kv_cache = None
     
     final_kv_cache = streaming_inference(
         model,
