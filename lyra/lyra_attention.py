@@ -148,10 +148,7 @@ class LyraGemma3Attention(nn.Module):
         **kwargs: Unpack[FlashAttentionKwargs],
     ) -> tuple[torch.Tensor, Optional[torch.Tensor], Optional[tuple[torch.Tensor]]]:
 
-        
-        self.lyra_cache = lyra_past_key_values
-        ##print(f"   - Loaded Lyra KV cache sequence length: {self.lyra_cache.get_seq_length(self.layer_idx)}")
-        
+        ##print(f"   - Loaded Lyra KV cache sequence length: {lyra_past_key_values.get_seq_length(self.layer_idx)}")        
         bsz, q_len, _ = hidden_states.shape
 
         # 1. Project Q, K, V (Once)
@@ -204,28 +201,28 @@ class LyraGemma3Attention(nn.Module):
 
         # --- 4. Process Lyra Stream (Static + Dynamic Context) ---
 
-        # Update the Lyra cache. It will handle RoPE for the keys and append them.
-        # We need to calculate the correct cache_position for the Lyra cache.
-        lyra_past_len = self.lyra_cache.get_seq_length(self.layer_idx)
-        lyra_cache_position = torch.arange(lyra_past_len, lyra_past_len + q_len, device=hidden_states.device)
-        lyra_position_ids = lyra_cache_position.unsqueeze(0)
-        lyra_cos, lyra_sin = self.lyra_rotary_emb(hidden_states, lyra_position_ids)
-
-        #print(f"Layer {self.layer_idx} PRE-UPDATE: Lyra_cos shape: {lyra_cos.shape}")
+        # Update the lyra KV cache. The `update` method applies RoPE to keys internally.
         
+        #if lyra_past_key_values is not None:
+            
+        lyra_past_len = lyra_past_key_values.get_seq_length(self.layer_idx)
+        lyra_cache_position = torch.arange(lyra_past_len, lyra_past_len + q_len, device=hidden_states.device)
+        lyra_cache_position_ids = lyra_cache_position.unsqueeze(0)
+        lyra_cos, lyra_sin = self.lyra_rotary_emb(value_states, position_ids=lyra_cache_position_ids)
         # Apply RoPE to Lyra's query.
         lyra_q_rope, _ = apply_rotary_pos_emb(lyra_q, key_states, lyra_cos, lyra_sin)
-        
+
+        cache_kwargs = {"sin": lyra_sin, "cos": lyra_cos, "cache_position": lyra_cache_position}
+        lyra_k_from_cache, lyra_v_from_cache = lyra_past_key_values.update(key_states, value_states, self.layer_idx, cache_kwargs)        
         lyra_cache_kwargs = {"sin": lyra_sin, "cos": lyra_cos, "cache_position": lyra_cache_position}
 
         # --- DIAGNOSTICS: Check cache state before update ---
-        #print(f"Layer {self.layer_idx} PRE-UPDATE: Lyra cache seq_len: {self.lyra_cache.get_seq_length(self.layer_idx)}")
-        
+        #print(f"Layer {self.layer_idx} PRE-UPDATE: Lyra cache seq_len: {lyra_past_key_values.get_seq_length(self.layer_idx)}")
         #print(f"Layer {self.layer_idx} MASK_INPUTS: hidden_states.shape: {hidden_states.shape}")
         #print(f"Layer {self.layer_idx} MASK_INPUTS: lyra_cache_position: {lyra_cache_position}")
         #print(f"Layer {self.layer_idx} MASK_INPUTS: is_sliding: {self.is_sliding}")
 
-        kv_length, kv_offset = self.lyra_cache.get_mask_sizes(lyra_cache_position, self.layer_idx)
+        #kv_length, kv_offset = lyra_past_key_values.get_mask_sizes(lyra_cache_position, self.layer_idx)
         #print(f"Layer {self.layer_idx} LAYER INFO FROM CACHE: kv_length: {kv_length}, kv_offset: {kv_offset}")    
 
         lyra_attention_mask = create_causal_mask(
@@ -233,21 +230,22 @@ class LyraGemma3Attention(nn.Module):
             input_embeds=hidden_states,
             attention_mask=None,  # The original padding mask
             cache_position=lyra_cache_position,
-            past_key_values=self.lyra_cache,
-            position_ids=lyra_position_ids,
+            past_key_values=lyra_past_key_values,
+            #position_ids=lyra_position_ids,
         )
+        
+        
         #print(f"Layer {self.layer_idx} PRE-UPDATE: Lyra attention mask: {lyra_attention_mask.shape}")
-        lyra_k_full, lyra_v_full = self.lyra_cache.update(key_states, value_states, self.layer_idx, lyra_cache_kwargs)
+        #lyra_k_full, lyra_v_full = lyra_past_key_values.update(key_states, value_states, self.layer_idx, lyra_cache_kwargs)
         #print(f"Layer {self.layer_idx} POST-UPDATE: Lyra K full shape: {lyra_k_full.shape}, Lyra V full shape: {lyra_v_full.shape}")
 
-        
 
         # Calculate attention for the Lyra stream.
         # The main `attention_mask` will be correctly sliced by the attention function.
         lyra_attn_output, _ = attention_interface(
             query=lyra_q_rope,
-            key=lyra_k_full,
-            value=lyra_v_full,
+            key=lyra_k_from_cache,
+            value=lyra_v_from_cache,
             attention_mask=lyra_attention_mask,
             num_key_value_groups=stream_num_key_value_groups,
             dropout=self.attention_dropout if self.training else 0.0,
