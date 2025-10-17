@@ -30,4 +30,4 @@ class GemmaInjector:
                 layer.self_attn = lyra_attn_module
                 
                 print(f"Replaced attention module in layer {layer.layer_idx} with LyraGemma3Attention.")
-        print("Baseline injection complete.")
+        print("LyraGemma3Attention injection complete.")
