@@ -21,7 +21,7 @@ class GemmaInjector:
         """
         Replaces the forward methods of the Gemma model and its decoder layers
         """
-        print("Enabling Lyra baseline injector...")
+        print("Enabling Lyra injector...")
 
         # --- Save and Patch Gemma3TextModel.forward ---
         # Save the original method directly onto the model instance
@@ -38,4 +38,4 @@ class GemmaInjector:
             layer.forward = types.MethodType(decoder_forward, layer)
         
         print(f"  - Patched Gemma3DecoderLayer.forward for {len(self.model.model.layers)} layers.")
-        print("Lyra baseline injection complete.")
+        print("Lyra injection complete.")
