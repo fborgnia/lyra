@@ -112,9 +112,14 @@ def forward(
     position_embeddings_global = self.rotary_emb(hidden_states, position_ids)
     position_embeddings_local = self.rotary_emb_local(hidden_states, position_ids)
 
+    # --- Calculate BOTH Lyra embeddings ---
+    position_embeddings_lyra_global = None
+    position_embeddings_lyra_local = None
     if lyra_position_ids is not None:
-        # Lyra layers are global, so they use the main rotary embedding module
-        position_embeddings_lyra = self.rotary_emb(hidden_states, lyra_position_ids)
+        # For Lyra layers that were originally global
+        position_embeddings_lyra_global = self.rotary_emb(hidden_states, lyra_position_ids)
+        # For Lyra layers that were originally local/sliding
+        position_embeddings_lyra_local = self.rotary_emb_local(hidden_states, lyra_position_ids)
 
     # decoder layers
     all_hidden_states = () if output_hidden_states else None
@@ -134,8 +139,9 @@ def forward(
             output_attentions=output_attentions,
             use_cache=use_cache,
             cache_position=cache_position,
-            # --- Lyra Arguments ---
-            position_embeddings_lyra=position_embeddings_lyra,
+            # --- Pass BOTH Lyra Embeddings Down ---
+            position_embeddings_lyra_global=position_embeddings_lyra_global,
+            position_embeddings_lyra_local=position_embeddings_lyra_local,
             lyra_attention_mask=causal_mask_mapping.get("cross_attention", None),
             lyra_past_key_values=lyra_past_key_values,
             lyra_position_ids=lyra_position_ids,

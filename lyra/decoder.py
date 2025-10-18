@@ -19,30 +19,40 @@ def forward(
     output_attentions: Optional[bool] = False,
     use_cache: Optional[bool] = False,
     cache_position: Optional[torch.LongTensor] = None,
-     # --- Lyra Arguments ---
-    position_embeddings_lyra: Optional[torch.Tensor] = None,
+    # --- Accept BOTH Lyra Embeddings ---
+    position_embeddings_lyra_global: Optional[torch.Tensor] = None,
+    position_embeddings_lyra_local: Optional[torch.Tensor] = None,
     lyra_attention_mask: Optional[torch.Tensor] = None,
     lyra_past_key_values: Optional[Cache] = None,
     lyra_position_ids: Optional[torch.LongTensor] = None,
     lyra_cache_position: Optional[torch.LongTensor] = None,
-    # --- End Lyra Arguments ---
     **kwargs,
 ) -> tuple[torch.FloatTensor, Optional[tuple[torch.FloatTensor, torch.FloatTensor]]]:
     residual = hidden_states
 
     hidden_states = self.input_layernorm(hidden_states)
 
-    # apply global RoPE to non-sliding layer only
-    if self.self_attn.is_sliding:
-        position_embeddings = position_embeddings_local
-    else:
-        # Highjack the global layer with lyra cache
-        #position_embeddings = position_embeddings_global
-        position_embeddings = position_embeddings_lyra
+    is_lyra_layer = hasattr(self, 'is_lyra_layer') and self.is_lyra_layer
+
+    # --- Updated Routing Logic ---
+    if is_lyra_layer and lyra_past_key_values is not None:
+        # This is a Lyra layer, so hijack the main context
         past_key_values = lyra_past_key_values
         attention_mask = lyra_attention_mask
         position_ids = lyra_position_ids
         cache_position = lyra_cache_position
+        
+        # Now, select the correct Lyra embedding based on the layer's original type
+        if self.self_attn.is_sliding:
+            position_embeddings = position_embeddings_lyra_local
+        else:
+            position_embeddings = position_embeddings_lyra_global
+            
+    # Fallback for non-Lyra layers
+    elif self.self_attn.is_sliding:
+        position_embeddings = position_embeddings_local
+    else:
+        position_embeddings = position_embeddings_global
 
     hidden_states, self_attn_weights = self.self_attn(
         hidden_states=hidden_states,
@@ -57,6 +67,7 @@ def forward(
     )
     hidden_states = self.post_attention_layernorm(hidden_states)
     hidden_states = residual + hidden_states
+    #hidden_states = residual + (hidden_states * 1.4959)
 
     residual = hidden_states
     hidden_states = self.pre_feedforward_layernorm(hidden_states)
