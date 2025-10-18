@@ -29,6 +29,9 @@ def forward(
     )
     use_cache = use_cache if use_cache is not None else self.config.use_cache
 
+    # Get the lyra_past_key_values from kwargs
+    lyra_past_key_values = kwargs.get("lyra_past_key_values", None)
+
     if (input_ids is None) ^ (inputs_embeds is not None):
         raise ValueError("You must specify exactly one of input_ids or inputs_embeds")
 
@@ -51,9 +54,23 @@ def forward(
             past_seen_tokens + inputs_embeds.shape[1],
             device=inputs_embeds.device,
         )
+    
+    # 1. Calculate cache_position for the Lyra stream
+    lyra_cache_position = None
+    if lyra_past_key_values is not None:
+        lyra_past_seen_tokens = lyra_past_key_values.get_seq_length()
+        lyra_cache_position = torch.arange(
+            lyra_past_seen_tokens,
+            lyra_past_seen_tokens + inputs_embeds.shape[1],
+            device=inputs_embeds.device,
+        )
 
     if position_ids is None:
         position_ids = cache_position.unsqueeze(0)
+
+    lyra_position_ids = None
+    if lyra_cache_position is not None:
+        lyra_position_ids = lyra_cache_position.unsqueeze(0)
 
     # It may already have been prepared by e.g. `generate`
     if not isinstance(causal_mask_mapping := attention_mask, dict):
@@ -72,12 +89,31 @@ def forward(
             "sliding_attention": create_sliding_window_causal_mask(**mask_kwargs),
         }
 
+        # 2. If lyra_past_key_values exists, create its mask
+        if lyra_past_key_values is not None:
+            # Prepare mask arguments for the Lyra stream
+            lyra_mask_kwargs = {
+                "config": self.config,
+                "input_embeds": inputs_embeds,
+                "attention_mask": attention_mask, # This is often None and handled by the function
+                "cache_position": lyra_cache_position, # We will need to adjust this for Lyra
+                "past_key_values": lyra_past_key_values,
+                "position_ids": lyra_position_ids, # We will also need to adjust this
+            }
+            # Lyra layers are global, so we use create_causal_mask
+            causal_mask_mapping["lyra_attention"] = create_causal_mask(**lyra_mask_kwargs)
+
     # embed positions
     hidden_states = inputs_embeds
 
     # create position embeddings to be shared across the decoder layers
     position_embeddings_global = self.rotary_emb(hidden_states, position_ids)
     position_embeddings_local = self.rotary_emb_local(hidden_states, position_ids)
+
+    position_embeddings_lyra = None
+    if lyra_position_ids is not None:
+        # Lyra layers are global, so they use the main rotary embedding module
+        position_embeddings_lyra = self.rotary_emb(hidden_states, lyra_position_ids)
 
     # decoder layers
     all_hidden_states = () if output_hidden_states else None
