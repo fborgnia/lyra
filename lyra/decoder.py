@@ -16,22 +16,24 @@ def forward(
     attention_mask: Optional[torch.Tensor] = None,
     position_ids: Optional[torch.LongTensor] = None,
     past_key_values: Optional[Cache] = None,
-    output_attentions: Optional[bool] = None,
-    use_cache: Optional[bool] = None,
+    output_attentions: Optional[bool] = False,
+    use_cache: Optional[bool] = False,
     cache_position: Optional[torch.LongTensor] = None,
     **kwargs,
 ) -> tuple[torch.FloatTensor, Optional[tuple[torch.FloatTensor, torch.FloatTensor]]]:
-    """
-    This function will replace Gemma3DecoderLayer.forward.
-    For the baseline, it simply calls the original forward method for this layer.
-    """
-    # print(f"[Injector] In forward for layer {self.layer_idx}") # Uncomment for debugging
+    residual = hidden_states
 
-    # Call the original method for this specific layer
-    return self.original_decoder_layer_forward(
+    hidden_states = self.input_layernorm(hidden_states)
+
+    # apply global RoPE to non-sliding layer only
+    if self.self_attn.is_sliding:
+        position_embeddings = position_embeddings_local
+    else:
+        position_embeddings = position_embeddings_global
+
+    hidden_states, self_attn_weights = self.self_attn(
         hidden_states=hidden_states,
-        position_embeddings_global=position_embeddings_global,
-        position_embeddings_local=position_embeddings_local,
+        position_embeddings=position_embeddings,
         attention_mask=attention_mask,
         position_ids=position_ids,
         past_key_values=past_key_values,
@@ -40,3 +42,18 @@ def forward(
         cache_position=cache_position,
         **kwargs,
     )
+    hidden_states = self.post_attention_layernorm(hidden_states)
+    hidden_states = residual + hidden_states
+
+    residual = hidden_states
+    hidden_states = self.pre_feedforward_layernorm(hidden_states)
+    hidden_states = self.mlp(hidden_states)
+    hidden_states = self.post_feedforward_layernorm(hidden_states)
+    hidden_states = residual + hidden_states
+
+    outputs = (hidden_states,)
+
+    if output_attentions:
+        outputs += (self_attn_weights,)
+
+    return outputs

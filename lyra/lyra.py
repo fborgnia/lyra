@@ -23,17 +23,13 @@ class GemmaInjector:
         """
         print("Enabling Lyra injector...")
 
-        # --- Save and Patch Gemma3TextModel.forward ---
-        # Save the original method directly onto the model instance
-        self.model.model.original_text_model_forward = self.model.model.forward
+        # --- Patch Gemma3TextModel.forward ---
         # Replace the instance's forward method with our new one
         self.model.model.forward = types.MethodType(forward, self.model.model)
         print("  - Patched Gemma3TextModel.forward")
 
-        # --- Save and Patch Gemma3DecoderLayer.forward for each layer ---
+        # --- Patch Gemma3DecoderLayer.forward for each layer ---
         for i, layer in enumerate(self.model.model.layers):
-            # Save the original method for this specific layer instance
-            layer.original_decoder_layer_forward = layer.forward
             # Replace the instance's forward method
             layer.forward = types.MethodType(decoder_forward, layer)
         
