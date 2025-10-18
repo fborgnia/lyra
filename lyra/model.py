@@ -36,9 +36,6 @@ def forward(
     )
     use_cache = use_cache if use_cache is not None else self.config.use_cache
 
-    # Get the lyra_past_key_values from kwargs
-    lyra_past_key_values = kwargs.get("lyra_past_key_values", None)
-
     if (input_ids is None) ^ (inputs_embeds is not None):
         raise ValueError("You must specify exactly one of input_ids or inputs_embeds")
 
@@ -142,6 +139,7 @@ def forward(
             lyra_attention_mask=causal_mask_mapping.get("cross_attention", None),
             lyra_past_key_values=lyra_past_key_values,
             lyra_position_ids=lyra_position_ids,
+            lyra_cache_position=lyra_cache_position,
             # --- End Lyra Arguments ---
             **kwargs,
         )

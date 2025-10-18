@@ -19,6 +19,13 @@ def forward(
     output_attentions: Optional[bool] = False,
     use_cache: Optional[bool] = False,
     cache_position: Optional[torch.LongTensor] = None,
+     # --- Lyra Arguments ---
+    position_embeddings_lyra: Optional[torch.Tensor] = None,
+    lyra_attention_mask: Optional[torch.Tensor] = None,
+    lyra_past_key_values: Optional[Cache] = None,
+    lyra_position_ids: Optional[torch.LongTensor] = None,
+    lyra_cache_position: Optional[torch.LongTensor] = None,
+    # --- End Lyra Arguments ---
     **kwargs,
 ) -> tuple[torch.FloatTensor, Optional[tuple[torch.FloatTensor, torch.FloatTensor]]]:
     residual = hidden_states
@@ -29,7 +36,13 @@ def forward(
     if self.self_attn.is_sliding:
         position_embeddings = position_embeddings_local
     else:
-        position_embeddings = position_embeddings_global
+        # Highjack the global layer with lyra cache
+        #position_embeddings = position_embeddings_global
+        position_embeddings = position_embeddings_lyra
+        past_key_values = lyra_past_key_values
+        attention_mask = lyra_attention_mask
+        position_ids = lyra_position_ids
+        cache_position = lyra_cache_position
 
     hidden_states, self_attn_weights = self.self_attn(
         hidden_states=hidden_states,
