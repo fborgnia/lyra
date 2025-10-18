@@ -30,7 +30,9 @@ def lyra_forward(
     This function will replace Gemma3TextModel.forward.
     For the baseline, it simply calls the original forward method.
     """
-    # print("[Injector] In lyra_forward") # Uncomment for debugging
+
+    #if 'lyra_past_key_values' in kwargs:
+        #print(f"[Injector] In lyra_forward received lyra_past_key_values {kwargs['lyra_past_key_values']}") # Uncomment for debugging
     
     # Call the original method that we saved on the model instance
     return self.original_text_model_forward(

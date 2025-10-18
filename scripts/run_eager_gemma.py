@@ -23,7 +23,7 @@ def greedy_generate(model, tokenizer, input_ids, past_key_values, lyra_past_key_
     outputs = model(
         input_ids=input_ids,
         past_key_values=past_key_values,
-        #lyra_past_key_values=lyra_past_key_values,
+        lyra_past_key_values=lyra_past_key_values,
         use_cache=True,
     )
     past_key_values = outputs.past_key_values
@@ -36,7 +36,7 @@ def greedy_generate(model, tokenizer, input_ids, past_key_values, lyra_past_key_
         outputs = model(
             input_ids=pred_token_idx,
             past_key_values=past_key_values,
-            #lyra_past_key_values=lyra_past_key_values,
+            lyra_past_key_values=lyra_past_key_values,
             use_cache=True,
         )
         past_key_values = outputs.past_key_values
