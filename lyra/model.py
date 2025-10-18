@@ -21,6 +21,13 @@ def forward(
     output_attentions: Optional[bool] = None,
     output_hidden_states: Optional[bool] = None,
     cache_position: Optional[torch.LongTensor] = None,
+    # --- Lyra Arguments ---
+    position_embeddings_lyra: Optional[torch.Tensor] = None,
+    lyra_attention_mask: Optional[torch.Tensor] = None,
+    lyra_past_key_values: Optional[Cache] = None,
+    lyra_position_ids: Optional[torch.LongTensor] = None,
+    lyra_cache_position: Optional[torch.LongTensor] = None,
+    # --- End Lyra Arguments ---
     **kwargs: Unpack[TransformersKwargs],
 ) -> BaseModelOutputWithPast:
     output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
@@ -56,7 +63,6 @@ def forward(
         )
     
     # 1. Calculate cache_position for the Lyra stream
-    lyra_cache_position = None
     if lyra_past_key_values is not None:
         lyra_past_seen_tokens = lyra_past_key_values.get_seq_length()
         lyra_cache_position = torch.arange(
@@ -68,7 +74,6 @@ def forward(
     if position_ids is None:
         position_ids = cache_position.unsqueeze(0)
 
-    lyra_position_ids = None
     if lyra_cache_position is not None:
         lyra_position_ids = lyra_cache_position.unsqueeze(0)
 
@@ -89,7 +94,7 @@ def forward(
             "sliding_attention": create_sliding_window_causal_mask(**mask_kwargs),
         }
 
-        # 2. If lyra_past_key_values exists, create its mask
+        # If lyra_past_key_values exists, create its mask
         if lyra_past_key_values is not None:
             # Prepare mask arguments for the Lyra stream
             lyra_mask_kwargs = {
@@ -101,7 +106,7 @@ def forward(
                 "position_ids": lyra_position_ids, # We will also need to adjust this
             }
             # Lyra layers are global, so we use create_causal_mask
-            causal_mask_mapping["lyra_attention"] = create_causal_mask(**lyra_mask_kwargs)
+            causal_mask_mapping["cross_attention"] = create_causal_mask(**lyra_mask_kwargs)
 
     # embed positions
     hidden_states = inputs_embeds
@@ -110,7 +115,6 @@ def forward(
     position_embeddings_global = self.rotary_emb(hidden_states, position_ids)
     position_embeddings_local = self.rotary_emb_local(hidden_states, position_ids)
 
-    position_embeddings_lyra = None
     if lyra_position_ids is not None:
         # Lyra layers are global, so they use the main rotary embedding module
         position_embeddings_lyra = self.rotary_emb(hidden_states, lyra_position_ids)
@@ -133,6 +137,12 @@ def forward(
             output_attentions=output_attentions,
             use_cache=use_cache,
             cache_position=cache_position,
+            # --- Lyra Arguments ---
+            position_embeddings_lyra=position_embeddings_lyra,
+            lyra_attention_mask=causal_mask_mapping.get("cross_attention", None),
+            lyra_past_key_values=lyra_past_key_values,
+            lyra_position_ids=lyra_position_ids,
+            # --- End Lyra Arguments ---
             **kwargs,
         )
 
