@@ -10,8 +10,6 @@ from transformers.processing_utils import Unpack
 
 logger = logging.get_logger(__name__)
 
-#@check_model_inputs
-#@auto_docstring
 def forward(
     self,
     input_ids: Optional[torch.LongTensor] = None,
