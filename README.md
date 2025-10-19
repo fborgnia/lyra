@@ -82,7 +82,7 @@ $python scripts/run_eager_gemma.py --load_cache_file data/lyra.pth
 ````
 
 
-For example, after 122 turns of random mt_bench coversational turns including writing, reasoning and role playing tasks the mode continues to apply the persona, and to remeber its name as in turn 1. proving this architecture is an effective solution for Alignment and persona drift.
+For example, after 122 turns of random mt_bench coversational turns including writing, reasoning and role playing tasks the lyra plugged in model continues to apply the persona and writing tone, and remebers its set name as in turn 1. This demonstrates the architecture is an effective solution for Alignment and persona drift, and can be implemented with zero-fine tunning using the pre-trained model's attention heads.
 
 ```txt
 --- Turn 122 ---
