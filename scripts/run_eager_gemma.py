@@ -113,9 +113,8 @@ def main(args):
         injector.enable()
         print("Lyra injection layer enabled.")
 
-    test_filepath = os.path.join(args.data_root, "mt_bench.jsonl")
-    print(f"Loading data from {test_filepath} ...")
-    list_data = load_jsonl(test_filepath)
+    print(f"Loading data from {args.input_file} ...")
+    list_data = load_jsonl(args.input_file)
     prompts = []
     for sample in list_data:
         prompts += sample["turns"]
@@ -161,7 +160,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--model_name_or_path", type=str, default="models/gemma-3-1b-it"
     )
-    parser.add_argument("--data_root", type=str, default="data/")
+    parser.add_argument("--input_file", type=str, default="data/mt_bench.jsonl", help="File path to load the input prompts from. Must in formatted as jsonl in the structure of mt_bench data.")
     parser.add_argument("--max_gen_len", type=int, default=512)
     parser.add_argument("--sliding_window", type=int, default=512, help="Sliding window size for Gemma attention.")
     parser.add_argument("--save_cache_file", type=str, default=None, help="File path to save the final KV cache.")
