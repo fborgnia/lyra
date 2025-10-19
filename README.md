@@ -34,19 +34,19 @@ When the model processes a new token:
 
 ### Why It Works Without Fine-Tuning
 
-The key to Lyra's success is that it **respects the model's original architecture**. The breakthrough came from realizing:
+The key to Lyra's success is that it **respects the model's original architecture**.
 
-*   Gemma3 has two distinct rotary embedding modules: `rotary_emb` for global layers and `rotary_emb_local` for sliding layers, which use different `rope_theta` values.
-*   Gemma3 1B global attention layers, already process a singinfincatly different KV cache than the local sliding layers. With an effective tolerance of approx 4.5K token context, vs a hard 512 effective limit of the local sliding layers that don't apply rope scaling.
-*   Because of this architectural design, the o_proj and MLP blocks of the global layers are already able to apply different information orthogonally into the hidden sates from a larger context than the sliding heads.
-*   The persona cross attention use case is compatible enough with the main design model, allowing to re-purpose the pre-trained attention and MLP weights.
-*   The injected decoder logic is intelligent. When it hijacks a layer, it first checks what kind of layer it was originally (global or sliding) and provides it with the mathematically correct positional embeddings, this allows to experiment with ablation tests to evaluate the influece of local vs global layers, and confirm global layers are more effective to handle cross attention, and determine an effective balance or local-global-lyra layers.
+*   Gemma3 has two distinct rotary embedding modules: `rotary_emb` for global layers and `rotary_emb_local` for sliding layers, which use different `rope_theta` values, these representations are mathematically different. (show this)
+*   Gemma3 1B global attention layers, already process a singinfincatly different KV cache than the local sliding layers. With an effective tolerance of approx 4.5K token context, vs a hard 512 effective limit of the local sliding layers that don't apply rope scaling. (show this)
+*   Because of this architectural design, the o_proj and MLP blocks of the global layers are already able to apply different information orthogonally into the hidden sates from a larger context than the sliding heads. (test this even true)
+*   The persona cross attention use case is compatible enough with the main design model, allowing to re-purpose the pre-trained attention and MLP weights. (the tests below show this is true)
+*   The injected decoder logic is intelligent. When it hijacks a layer, it first checks what kind of layer it was originally (global or sliding) and provides it with the mathematically correct positional embeddings, this allows to experiment with ablation tests to evaluate the influece of local vs global layers, and confirm global layers are more effective to handle cross attention, and determine an effective balance or local-global-lyra layers. (I'll write a separate doc with this tests, the local attention layers also work for the purpose, i think the use case might be compatible with self attention in general)
 
 By speaking the exact "mathematical language" each layer was trained on, Lyra can feed it a different context without causing the model to fail. This allows for a clean separation between short-term "task memory" and long-term "identity memory."
 
 ## How to Use Lyra
 
-Follow these steps to set up the environment, pre-compute an Instruction cache, and run the model with mt_bench data.
+Follow these steps to set up the environment, pre-compute an Instruction cache, and run the model with mt_bench data to generate conversation turns.
 
 ### 1. Setup
 
@@ -61,6 +61,8 @@ pip install -r requirements.txt
 Then you'll need to download the base model [google/gemma3-1b-it](https://huggingface.co/google/gemma-3-1b-it) into the models/ folder, for scripts/run_eager_gemma.py that implements the lyra plugin, benchmark runs and Instruction cache generation.
 
 ### 2. Generate lyra_past_key_values precomputed instruction cache
+
+[I haven't implemented an attribute for specifying the data file, because i'm lazy. its harcoded so you need to be fiddling with the file content, do it and remove this message]
 
 Prepare an Instruction input, for example:
 
