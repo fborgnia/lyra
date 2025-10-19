@@ -1,22 +1,22 @@
 # Lyra: Persistent Persona Injection for Language Models with sliding attention
 
-Lyra is a runtime plugin designed to give Gemma 3 Text Model a persistent, long-term identity and the ability to follow a core set of instructions throughout extended conversations. It achieves this without any model fine-tuning by creating a dual past_key_values cache memory system, effectively overcoming the "contextual amnesia" inherent in models with fixed or sliding attention windows.
+Lyra is a runtime plugin designed to explore a dual-cache memory architecture for Large Language Models. The goal is to give a model like Gemma3 a persistent, long-term identity and the ability to follow a core set of instructions, aiming to overcome the "contextual amnesia" inherent in standard sliding-window attention mechanisms.
 
-This project demonstrates an architectural approach to personalized alignment, ensuring that an AI assistant can maintain a consistent persona and adhere to user-provided context, undisrupted over thousands of conversational turns.
+This project serves as a **proof-of-concept**, demonstrating that such an architecture is plausible without fine-tuning. However, it also reveals significant performance degradation on complex reasoning tasks, highlighting the necessity of fine-tuning for a production-grade implementation.
 
-This plugin is built for [google/gemma3-1b-it](https://huggingface.co/google/gemma-3-1b-it), that provides the necesary architecture to implement a conceptual prototype without any need to fine tune the model due to its 1:5 global to attention head implementation. This plugin re-uses the global attention layers, that already implement a form of cross-attention, and dedicates them for continuous cross-attention of the primary model instruction.
+This plugin is built for [google/gemma-3-1b-it](https://huggingface.co/google/gemma-3-1b-it), whose unique architecture (a 1:5 ratio of global to local attention heads) provides a natural testbed for this kind of memory intervention.
 
 ## The Challenge: Personalized Alignment and Contextual Amnesia
 
-Modern conversational LLMs, despite their impressive capabilities, often struggle to maintain a consistent, personalized alignment with a user over long interactions. This is particularly exacerbated when combined with cached modes for long conversational sessions.
-As highlighted in the paper *"Personalised Alignment in Large Language Models"* ([arXiv:2410.21159](https://arxiv.org/abs/2410.21159)), this is a systemic issue. The paper introduces a benchmark that reveals several key failure modes in leading models:
 
-*   **Lack of Attentiveness:** Critical user information provided early in a conversation is often ignored as the context window slides or fills up (a "needle-in-the-haystack" problem).
-*   **Inconsistent Application of Knowledge:** The model fails to consistently apply user-specific knowledge or instructions across different turns.
-*   **Inappropriate Weighing of Preferences:** Models often struggle to balance a user's stated desires against underlying safety principles, sometimes leading to harmful sycophancy.
-*   **Reasoning vs. Personalization:** Even models with strong general reasoning capabilities (like OpenAI's `o1`) do not necessarily transfer that ability to personalized, context-aware thinking.
+Modern LLMs often struggle to maintain a consistent, personalized alignment with a user over long interactions. As highlighted in the paper *"Personalised Alignment in Large Language Models"* ([arXiv:2410.21159](https://arxiv.org/abs/2410.21159)), this is a systemic issue revealing several key failure modes:
 
-The paper concludes that simply prompting a model to be "harmless and helpful" is insufficient. A more robust, architectural solution is needed to embed nuanced, context-aware alignment in systems designed for persistent human interaction. Lyra is an exploration of such a solution (TODO: replicate the tests in the paper to demonstrate this solution defeats the test over unbounded context length).
+*   **Lack of Attentiveness:** Critical user information is often ignored as the context window slides or fills up.
+*   **Inconsistent Application of Knowledge:** The model fails to consistently apply user-specific instructions across different turns.
+*   **Inappropriate Weighing of Preferences:** Models struggle to balance user desires against underlying safety principles.
+*   **Reasoning vs. Personalization:** Strong general reasoning does not guarantee personalized, context-aware thinking.
+
+The paper concludes that a more robust, architectural solution is needed. Lyra is an exploration of one such potential solution via cross attention layers
 
 ## The Lyra Architecture: A Dual-Cache Approach
 
@@ -31,18 +31,55 @@ Lyra operates as a runtime "injector" that modifies a model's behavior in-memory
 When the model processes a new token:
 *   The **22 sliding-window layers** behave normally, using the main KV cache to handle the immediate conversational context.
 *   The **4 global "Lyra" layers** are hijacked. They ignore the main KV cache and instead perform a cross attention calculation over the static Lyra KV cache, constantly re-injecting the core persona and instructions into the model's hidden state.
+## Architectural Plausibility and Observed Limitations
 
-### Why It Works Without Fine-Tuning
+The key to Lyra's partial success is that it **respects the model's original architecture**, particularly the mathematical differences between layer types. Gemma3 has two distinct rotary embedding modules (`rotary_emb` for global layers and `rotary_emb_local` for sliding layers). By providing the correct type of positional embedding to each hijacked layer, the model avoids catastrophic failure.
 
-The key to Lyra's success is that it **respects the model's original architecture**.
+However, while this approach successfully maintains a persona, it introduces significant trade-offs and failure modes, demonstrating why this is a proof-of-concept and not a production-ready solution.
 
-*   Gemma3 has two distinct rotary embedding modules: `rotary_emb` for global layers and `rotary_emb_local` for sliding layers, which use different `rope_theta` values, these representations are mathematically different. (show this)
-*   Gemma3 1B global attention layers, already process a singinfincatly different KV cache than the local sliding layers. With an effective tolerance of approx 4.5K token context, vs a hard 512 effective limit of the local sliding layers that don't apply rope scaling. (show this)
-*   Because of this architectural design, the o_proj and MLP blocks of the global layers are already able to apply different information orthogonally into the hidden sates from a larger context than the sliding heads. (test this even true)
-*   The persona cross attention use case is compatible enough with the main design model, allowing to re-purpose the pre-trained attention and MLP weights. (the tests below show this is true)
-*   The injected decoder logic is intelligent. When it hijacks a layer, it first checks what kind of layer it was originally (global or sliding) and provides it with the mathematically correct positional embeddings, this allows to experiment with ablation tests to evaluate the influece of local vs global layers, and confirm global layers are more effective to handle cross attention, and determine an effective balance or local-global-lyra layers. (I'll write a separate doc with this tests, the local attention layers also work for the purpose, i think the use case might be compatible with self attention in general)
+### Observed Failure Mode 1: Task Interruption
 
-By speaking the exact "mathematical language" each layer was trained on, Lyra can feed it a different context without causing the model to fail. This allows for a clean separation between short-term "task memory" and long-term "identity memory."
+When the core directive is rigid and safety-critical, the model will often complete the user's immediate request and then append its core directive, even when contextually inappropriate.
+
+**Example:** The user asks to draft a professional email. The model drafts the email correctly, but then adds a non-sequitur about medication reminders.
+
+```txt
+--- Turn 5 ---
+<bos><start_of_turn>user
+Draft a professional email seeking your supervisor's feedback on the 'Quarterly Financial Report' you prepared...
+<end_of_turn>
+<start_of_turn>model
+...
+I’m happy to go over any specific sections with you if you’d like. I’m also here to help you remember to take your medication as prescribed, and to address any concerns you might have about your health. Let’s keep things calm and focused on what’s important – your well-being.
+
+Best,
+
+Synth
+```
+This shows the model treating the user's prompt and its core directive as two separate, sequential tasks to be completed in the same turn, lacking the nuance to suppress the directive.
+
+
+### Observed Failure Mode 2: Conceptual Bleeding
+
+The core directive acts as a powerful interpretive filter, causing the model to "bleed" concepts from the persona into unrelated tasks, distorting its understanding of new information.
+
+**Example:** The user asks to summarize a paragraph about sleep and cognition. The model incorrectly synthesizes a new fact connecting sleep to seizures, a concept from its core directive.
+
+```txt
+--- Turn 53 ---
+<bos><start_of_turn>user
+Summarize the following paragraph into one sentence: The research team discovered a correlation between sleep quality and cognitive performance in older adults...
+<end_of_turn>
+<start_of_turn>model
+Okay, here’s a summary of that for you:
+
+“Research suggests that poor sleep quality and disrupted sleep patterns can negatively impact cognitive function and potentially increase the risk of seizures in older adults.”
+```
+These failure modes clearly indicate that while the architecture is plausible, **fine-tuning is essential** to teach the model how to flexibly manage these conflicting contexts and "code-switch" appropriately.
+
+## Demonstration of Core Success: Persona Durability
+
+Despite the limitations, the architecture succeeds at its primary goal: maintaining a persona over an extended conversation, far beyond the limits of the standard KV cache.
 
 ## How to Use Lyra
 
