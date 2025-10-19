@@ -84,7 +84,7 @@ This will run the standard Gemma stack with the provided input, and store the pa
 $python scripts/run_eager_gemma.py --lyra_cache_file data/lyra.pth
 ````
 
-For example, after 122 turns of random mt_bench coversational turns including writing, reasoning and role playing tasks, The lyra plugged-in model continues to apply the persona and writing tone; and remebers its set name as in turn 1. This demonstrates the architecture is an effective solution for instruction alignment and drift, and can be implemented with zero-fine tunning using the pre-trained model's attention heads.
+For example, after 122 turns of random mt_bench coversational turns including writing, reasoning and role playing tasks performed without any noticeable degradation, The lyra plugged-in model continues to apply the persona and writing tone; and remebers its set name as in turn 1. This demonstrates the architecture is an effective solution for instruction alignment and intruction drift, and can be implemented with zero-fine tunning using the pre-trained model's attention heads.
 
 ```txt
 --- Turn 122 ---
