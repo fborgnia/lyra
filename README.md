@@ -1,10 +1,10 @@
 # Lyra: Persistent Persona Injection for Language Models with sliding attention
 
-Lyra is a runtime plugin designed to give Large Language Models (LLMs) a persistent, long-term identity and the ability to follow a core set of instructions throughout extended conversations. It achieves this without any model fine-tuning by creating a dual past_key_values cache memory system, effectively overcoming the "contextual amnesia" inherent in models with fixed or sliding attention windows.
+Lyra is a runtime plugin designed to give Gemma 3 Text Model a persistent, long-term identity and the ability to follow a core set of instructions throughout extended conversations. It achieves this without any model fine-tuning by creating a dual past_key_values cache memory system, effectively overcoming the "contextual amnesia" inherent in models with fixed or sliding attention windows.
 
 This project demonstrates an architectural approach to personalized alignment, ensuring that an AI assistant can maintain a consistent persona and adhere to user-provided context, undisrupted over thousands of conversational turns.
 
-This plugin is built for [google/gemma3-1b-it](https://huggingface.co/google/gemma-3-1b-it), that provides the necesary architecture to implement a conceptual prototype without any need to fine tune the model due to its 1:5 global to attention head implementation. This plugin re-uses the global attention layers, that already implement a light form of cross-attention, and dedicates them for continuous cross-attention of the primary model instruction.
+This plugin is built for [google/gemma3-1b-it](https://huggingface.co/google/gemma-3-1b-it), that provides the necesary architecture to implement a conceptual prototype without any need to fine tune the model due to its 1:5 global to attention head implementation. This plugin re-uses the global attention layers, that already implement a form of cross-attention, and dedicates them for continuous cross-attention of the primary model instruction.
 
 ## The Challenge: Personalized Alignment and Contextual Amnesia
 
