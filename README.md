@@ -16,7 +16,7 @@ As highlighted in the paper *"Personalised Alignment in Large Language Models"* 
 *   **Inappropriate Weighing of Preferences:** Models often struggle to balance a user's stated desires against underlying safety principles, sometimes leading to harmful sycophancy.
 *   **Reasoning vs. Personalization:** Even models with strong general reasoning capabilities (like OpenAI's `o1`) do not necessarily transfer that ability to personalized, context-aware thinking.
 
-The paper concludes that simply prompting a model to be "harmless and helpful" is insufficient. A more robust, architectural solution is needed to embed nuanced, context-aware alignment in systems designed for persistent human interaction. Lyra is an exploration of such a solution.
+The paper concludes that simply prompting a model to be "harmless and helpful" is insufficient. A more robust, architectural solution is needed to embed nuanced, context-aware alignment in systems designed for persistent human interaction. Lyra is an exploration of such a solution (TODO: replicate the tests in the paper to demonstrate this solution defeats the test over unbounded context length).
 
 ## The Lyra Architecture: A Dual-Cache Approach
 
