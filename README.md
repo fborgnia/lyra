@@ -9,7 +9,7 @@ This plugin is built for [google/gemma3-1b-it](https://huggingface.co/google/gem
 ## The Challenge: Personalized Alignment and Contextual Amnesia
 
 Modern conversational LLMs, despite their impressive capabilities, often struggle to maintain a consistent, personalized alignment with a user over long interactions. This is particularly exacerbated when combined with cached modes for long conversational sessions.
-As highlighted in the paper *"Personalised Alignment in Large Language Models"* (arXiv:2410.21159), this is a systemic issue. The paper introduces a benchmark that reveals several key failure modes in leading models:
+As highlighted in the paper *"Personalised Alignment in Large Language Models"* ([arXiv:2410.21159](https://arxiv.org/abs/2410.21159)), this is a systemic issue. The paper introduces a benchmark that reveals several key failure modes in leading models:
 
 *   **Lack of Attentiveness:** Critical user information provided early in a conversation is often ignored as the context window slides or fills up (a "needle-in-the-haystack" problem).
 *   **Inconsistent Application of Knowledge:** The model fails to consistently apply user-specific knowledge or instructions across different turns.
