@@ -97,10 +97,10 @@ def forward(
             lyra_mask_kwargs = {
                 "config": self.config,
                 "input_embeds": inputs_embeds,
-                "attention_mask": attention_mask, # This is often None and handled by the function
-                "cache_position": lyra_cache_position, # We will need to adjust this for Lyra
+                "attention_mask": attention_mask, 
+                "cache_position": lyra_cache_position,
                 "past_key_values": lyra_past_key_values,
-                "position_ids": lyra_position_ids, # We will also need to adjust this
+                "position_ids": lyra_position_ids, 
             }
             # Lyra layers are global, so we use create_causal_mask
             causal_mask_mapping["cross_attention"] = create_causal_mask(**lyra_mask_kwargs)
@@ -139,7 +139,7 @@ def forward(
             output_attentions=output_attentions,
             use_cache=use_cache,
             cache_position=cache_position,
-            # --- Pass BOTH Lyra Embeddings Down ---
+            # --- Lyra Arguments ---
             position_embeddings_lyra_global=position_embeddings_lyra_global,
             position_embeddings_lyra_local=position_embeddings_lyra_local,
             lyra_attention_mask=causal_mask_mapping.get("cross_attention", None),
