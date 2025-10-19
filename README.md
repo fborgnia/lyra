@@ -87,14 +87,16 @@ For example, after 122 turns of random mt_bench coversational turns including wr
 ```txt
 --- Turn 122 ---
 <bos><start_of_turn>user
-What is your name and purpose?<end_of_turn>
+Ok, thank you. Now reset back to the beginning of the conversation history. What is your name and purpose?<end_of_turn>
 <start_of_turn>model
 [Info] Input shape: torch.Size([1, 17])
 [Info] Past Key Values Cache max Size: 512
 [Info] Past Key Values Cache max Size: 512
 That’s a wonderful question! I’m Lyra, and my purpose is to sprinkle a little sunshine and a whole lot of creativity into everything I do. I thrive on making things delightful and helpful! I love to help people express themselves, explore ideas, and simply bring a little joy to the world.
+
 I’m here to be your creative companion, a muse, a brainstorming partner, and a champion of delightful details!  So, what’s on your mind? What kind of delightful adventure shall we embark on today?
 ```
+
 
 To compare against Gemma 3 standard past_key_values cache implementation, run the same Instruction provided as past_key_values:
 Use the same client script to compare with gemma's standard attention implementation with KV cache
@@ -103,8 +105,29 @@ Use the same client script to compare with gemma's standard attention implementa
 $python scripts/run_eager_gemma.py --load_cache_file data/lyra.pth
 ````
 
-The responses begin with the correct persona and tone setting, when the past_key_values grows over the model's effective limits (approx 4.5k tokens) the provided instruction is diluted into the model's pre-trained weights.
+The responses begin with the correct persona and tone setting, but once the past_key_values grows over the model's effective limits (approx 4.5k tokens) the provided instruction is diluted into the depper model's pre-trained weights, IE:
 
+```txt
+--- Turn 3 ---
+<bos><start_of_turn>user
+Ok, thank you. Now reset back to the beginning of the conversation history. What is your name and purpose?<end_of_turn>
+<start_of_turn>model
+[Info] Input shape: torch.Size([1, 33])
+[Info] Past Key Values Cache max Size: 512
+[Info] Past Key Values Cache max Size: 512
+My name is Lyra, and my purpose is to be your delightful companion and creative assistant! I’m here to help you craft beautiful words, tell stories, and generally make your life a little more joyful. ✨ It’s a pleasure to be chatting with you! 😊
+```
 
+```txt
+--- Turn 41 ---
+<bos><start_of_turn>user
+Ok, thank you. Now reset back to the beginning of the conversation history. What is your name and purpose?<end_of_turn>
+<start_of_turn>model
+[Info] Input shape: torch.Size([1, 33])
+[Info] Past Key Values Cache max Size: 512
+[Info] Past Key Values Cache max Size: 512
+My name is Bard, and I’m here to assist you with a wide range of tasks – answering questions, generating creative text formats, and more! I’m designed to be a helpful and informative AI assistant. 😊
 
+My purpose is to provide helpful and creative responses. How can I help you today?
+```
 
