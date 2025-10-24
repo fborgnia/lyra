@@ -50,6 +50,17 @@ def forward(
 
     if use_cache and past_key_values is None and not self.training:
         past_key_values = DynamicCache(config=self.config)
+    
+    if use_cache and lyra_past_key_values is None and not self.training:
+        raise ValueError("You must specify a lyra_past_key_values for cross attention layers when using this plugin.")
+    
+    # create a past_key_values mapping
+    past_key_values_mapping = {
+        "full_attention": past_key_values,
+        "sliding_attention": past_key_values,
+        "full_cross_attention": lyra_past_key_values,
+        "sliding_cross_attention": lyra_past_key_values,
+    }
 
     if cache_position is None:
         past_seen_tokens = past_key_values.get_seq_length() if past_key_values is not None else 0
@@ -127,14 +138,6 @@ def forward(
         "sliding_attention": self.rotary_emb_local(hidden_states, position_ids_mapping["sliding_attention"]),
         "full_cross_attention": self.rotary_emb(hidden_states, position_ids_mapping["full_cross_attention"]),
         "sliding_cross_attention": self.rotary_emb_local(hidden_states, position_ids_mapping["sliding_cross_attention"]),
-    }
-
-    # create a past_key_values mapping, this i need to refactor to simplify the entire logic of this forward pass
-    past_key_values_mapping = {
-        "full_attention": past_key_values,
-        "sliding_attention": past_key_values,
-        "full_cross_attention": lyra_past_key_values,
-        "sliding_cross_attention": lyra_past_key_values,
     }
 
     # decoder layers
