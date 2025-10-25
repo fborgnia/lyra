@@ -6,6 +6,7 @@ import argparse
 import os
 import sys
 import json
+import copy
 from transformers import AutoTokenizer, AutoModelForCausalLM
 
 # Add the project root directory to the Python path
@@ -27,6 +28,7 @@ def greedy_generate(model, tokenizer, input_ids, past_key_values, lyra_past_key_
         use_cache=True,
     )
     past_key_values = outputs.past_key_values
+    lyra_past_key_values = outputs.lyra_past_key_values
     pred_token_idx = outputs.logits[:, -1, :].argmax(dim=-1).unsqueeze(1)
     
     generated_ids = [pred_token_idx.item()]
@@ -40,6 +42,7 @@ def greedy_generate(model, tokenizer, input_ids, past_key_values, lyra_past_key_
             use_cache=True,
         )
         past_key_values = outputs.past_key_values
+        lyra_past_key_values = outputs.lyra_past_key_values
         
         #if past_key_values:
             #print(f"[Token {i+1}] Cache Length: {past_key_values[0][0].shape[2]}", flush=True)
@@ -81,8 +84,11 @@ def streaming_inference(model, tokenizer, prompts, kv_cache=None, lyra_kv_cache=
         print(f"[Info] Past Key Values Cache max Size: {past_key_values.get_max_cache_shape() if past_key_values else 0}")
         print(f"[Info] Past Key Values Cache max Size: {past_key_values.get_max_cache_shape() if past_key_values else 0}")
         
+        # Start with a fresh lyra_past_key_values with each generation
+        lyra_past_key_values = copy.deepcopy(lyra_kv_cache) if lyra_kv_cache is not None else None
+        
         past_key_values = greedy_generate(
-            model, tokenizer, input_ids, past_key_values, lyra_kv_cache, max_gen_len=max_gen_len
+            model, tokenizer, input_ids, past_key_values, lyra_past_key_values, max_gen_len=max_gen_len
         )
     return past_key_values
 

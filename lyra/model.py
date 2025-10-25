@@ -3,11 +3,12 @@ from typing import Optional
 
 from transformers.cache_utils import Cache, DynamicCache
 from transformers.masking_utils import create_causal_mask, create_sliding_window_causal_mask
-from transformers.modeling_outputs import BaseModelOutputWithPast
 from transformers.utils import ModelOutput, TransformersKwargs, auto_docstring, can_return_tuple, logging
+from dataclasses import dataclass
 from transformers.utils.generic import check_model_inputs
 from transformers.processing_utils import Unpack
-
+#from transformers.modeling_outputs import BaseModelOutputWithPast
+from .outputs import LyraModelOutputWithPast
 logger = logging.get_logger(__name__)
 
 def forward(
@@ -29,7 +30,7 @@ def forward(
     lyra_cache_position: Optional[torch.LongTensor] = None,
     # --- End Lyra Arguments ---
     **kwargs: Unpack[TransformersKwargs],
-) -> BaseModelOutputWithPast:
+) -> LyraModelOutputWithPast:
     output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
     output_hidden_states = (
         output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states
@@ -73,6 +74,7 @@ def forward(
     # Calculate cache_position for the Lyra stream
     if lyra_past_key_values is not None:
         lyra_past_seen_tokens = lyra_past_key_values.get_seq_length()
+        #print(f"   - Lyra Past Seen Tokens: {lyra_past_seen_tokens}")
         lyra_cache_position = torch.arange(
             lyra_past_seen_tokens,
             lyra_past_seen_tokens + inputs_embeds.shape[1],
@@ -103,6 +105,14 @@ def forward(
 
     # It may already have been prepared by e.g. `generate`
     if not isinstance(causal_mask_mapping := attention_mask, dict):
+        # --- DEBUG PRINTS START ---
+        #print("\n--- [Lyra Debug] Entering Mask Creation (Pre-fill Phase) ---")
+        #print(f"Shape of inputs_embeds: {inputs_embeds.shape}")
+        #if past_key_values:
+        #    print(f"Main Cache Seq Length: {past_key_values.get_seq_length()}")
+        #if lyra_past_key_values:
+        #    print(f"Lyra Cache Seq Length: {lyra_past_key_values.get_seq_length()}")
+        # --- DEBUG PRINTS END ---
         # Prepare mask arguments
         mask_kwargs = {
             "config": self.config,
@@ -128,6 +138,16 @@ def forward(
             "full_cross_attention": create_causal_mask(**lyra_mask_kwargs),  # to be filled if lyra_past_key_values exists
             "sliding_cross_attention": create_sliding_window_causal_mask(**lyra_mask_kwargs),
         }
+    #else:
+        # --- DEBUG PRINTS START ---
+        # This block runs during token-by-token decoding
+        #print("\n--- [Lyra Debug] Skipping Mask Creation (Decoding Phase) ---")
+        #print(f"Shape of inputs_embeds: {inputs_embeds.shape}")
+        #if past_key_values:
+        #    print(f"Main Cache Seq Length: {past_key_values.get_seq_length()}")
+        #if lyra_past_key_values:
+        #    print(f"Lyra Cache Seq Length: {lyra_past_key_values.get_seq_length()}")
+        # --- DEBUG PRINTS END ---
 
     # embed positions
     hidden_states = inputs_embeds
@@ -170,9 +190,10 @@ def forward(
     if output_hidden_states:
         all_hidden_states += (hidden_states,)
 
-    return BaseModelOutputWithPast(
+    return LyraModelOutputWithPast(
         last_hidden_state=hidden_states,
         past_key_values=past_key_values,
+        lyra_past_key_values=lyra_past_key_values,
         hidden_states=all_hidden_states,
         attentions=all_self_attns,
     )

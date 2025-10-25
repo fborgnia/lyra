@@ -8,6 +8,7 @@ from transformers.modeling_outputs import BaseModelOutputWithPast, CausalLMOutpu
 from transformers.processing_utils import Unpack
 from transformers.utils import logging
 
+from .causal_lm import forward as causal_lm_forward
 from .model import forward
 from .decoder import forward as decoder_forward
 
@@ -29,6 +30,11 @@ class GemmaInjector:
         Replaces the forward methods of the Gemma model and its decoder layers
         """
         print("Enabling Lyra injector...")
+
+        # --- Patch Gemma3ForCausalLM.forward ---
+        # Replace the instance's forward method with our new one
+        self.model.forward = types.MethodType(causal_lm_forward, self.model)
+        print("  - Patched Gemma3ForCausalLM.forward")
 
         # --- Patch Gemma3TextModel.forward ---
         # Replace the instance's forward method with our new one
