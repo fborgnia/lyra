@@ -22,8 +22,17 @@ def forward(
 ) -> tuple[torch.FloatTensor, Optional[tuple[torch.FloatTensor, torch.FloatTensor]]]:
     residual = hidden_states
 
-    hidden_states = self.input_layernorm(hidden_states)
+    layer_idx = kwargs.get("layer_idx", -1)
+    is_lyra_layer = "full_cross_attention" in self.attention_type
+    #print(f" [DEBUG] DECODER LAYER {layer_idx} - ATTN Type: {self.attention_type} ")
 
+    #if is_lyra_layer and past_key_values:
+    #    print(f"  [DEBUG] DECODER L{layer_idx} - Received Lyra Cache ID: {id(past_key_values)}")
+    #    pre_attn_len = past_key_values.layers[layer_idx].get_seq_length()
+
+    
+    hidden_states = self.input_layernorm(hidden_states)
+    #print(f" [DEBUG] DECODER LAYER - USE CACHE - {use_cache} ")
     hidden_states, self_attn_weights = self.self_attn(
         hidden_states=hidden_states,
         position_embeddings=position_embeddings,
@@ -37,7 +46,7 @@ def forward(
     )
     hidden_states = self.post_attention_layernorm(hidden_states)
     hidden_states = residual + hidden_states
-    
+
     #hidden_states = residual + (hidden_states * 1.01)
 
     residual = hidden_states

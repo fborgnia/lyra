@@ -28,7 +28,8 @@ def greedy_generate(model, tokenizer, input_ids, past_key_values, lyra_past_key_
         use_cache=True,
     )
     past_key_values = outputs.past_key_values
-    lyra_past_key_values = outputs.lyra_past_key_values
+    if args.lyra_cache_file is not None:
+        lyra_past_key_values = outputs.lyra_past_key_values
     pred_token_idx = outputs.logits[:, -1, :].argmax(dim=-1).unsqueeze(1)
     
     generated_ids = [pred_token_idx.item()]
@@ -42,8 +43,14 @@ def greedy_generate(model, tokenizer, input_ids, past_key_values, lyra_past_key_
             use_cache=True,
         )
         past_key_values = outputs.past_key_values
-        lyra_past_key_values = outputs.lyra_past_key_values
+        if args.lyra_cache_file is not None:
+            lyra_past_key_values = outputs.lyra_past_key_values
         
+        #print(f" [DEBUG] GEN -  Past Key Values Cache Size: {past_key_values.get_seq_length() if past_key_values else None}")
+        #print(f" [DEBUG] GEN -  Lyra Past Key Values Cache max Size: {lyra_past_key_values.get_seq_length() if lyra_past_key_values else None}")
+        #if lyra_past_key_values is not None:
+        #    lyra_layer_lengths = [f"Layer {i} - length: {layer.get_seq_length()}" for i, layer in enumerate(lyra_past_key_values.layers)]
+        #    print(f" [DEBUG] GEN -  Lyra Past Key Values Cache Size: {lyra_layer_lengths}")
         #if past_key_values:
             #print(f"[Token {i+1}] Cache Length: {past_key_values[0][0].shape[2]}", flush=True)
 
@@ -81,8 +88,8 @@ def streaming_inference(model, tokenizer, prompts, kv_cache=None, lyra_kv_cache=
         
         input_shape = input_ids.shape
         print(f"[Info] Input shape: {input_shape}")
-        print(f"[Info] Past Key Values Cache max Size: {past_key_values.get_max_cache_shape() if past_key_values else 0}")
-        print(f"[Info] Past Key Values Cache max Size: {past_key_values.get_max_cache_shape() if past_key_values else 0}")
+        print(f"[Info] Past Key Values Cache max Size: {past_key_values.get_seq_length() if past_key_values else None}")
+        print(f"[Info] Lyra Past Key Values Cache max Size: {lyra_kv_cache.get_seq_length() if lyra_kv_cache else None}")
         
         # Start with a fresh lyra_past_key_values with each generation
         lyra_past_key_values = copy.deepcopy(lyra_kv_cache) if lyra_kv_cache is not None else None

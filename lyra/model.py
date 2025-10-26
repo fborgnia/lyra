@@ -65,6 +65,7 @@ def forward(
 
     if cache_position is None:
         past_seen_tokens = past_key_values.get_seq_length() if past_key_values is not None else 0
+        #print(f" [DEBUG] MODEL - Past key values length: {past_seen_tokens}")
         cache_position = torch.arange(
             past_seen_tokens,
             past_seen_tokens + inputs_embeds.shape[1],
@@ -73,7 +74,10 @@ def forward(
     
     # Calculate cache_position for the Lyra stream
     if lyra_past_key_values is not None:
-        lyra_past_seen_tokens = lyra_past_key_values.get_seq_length()
+        # I need the sequence length of the Lyra past key values here, 
+        # the default get_seq_length() gets it from layer 0, instead I want the first lyra layer
+        #lyra_past_seen_tokens = lyra_past_key_values.get_seq_length()
+        lyra_past_seen_tokens = lyra_past_key_values.layers[5].get_seq_length()
         #print(f"   - Lyra Past Seen Tokens: {lyra_past_seen_tokens}")
         lyra_cache_position = torch.arange(
             lyra_past_seen_tokens,
@@ -125,8 +129,8 @@ def forward(
         lyra_mask_kwargs = {
             "config": self.config,
             "input_embeds": inputs_embeds,
-            #"attention_mask": attention_mask, 
-            "attention_mask": None, 
+            "attention_mask": lyra_attention_mask, 
+            #"attention_mask": None, 
             "cache_position": lyra_cache_position,
             "past_key_values": lyra_past_key_values,
             "position_ids": lyra_position_ids, 
@@ -135,8 +139,8 @@ def forward(
         causal_mask_mapping = {
             "full_attention": create_causal_mask(**mask_kwargs),
             "sliding_attention": create_sliding_window_causal_mask(**mask_kwargs),
-            "full_cross_attention": create_causal_mask(**lyra_mask_kwargs),  # to be filled if lyra_past_key_values exists
-            "sliding_cross_attention": create_sliding_window_causal_mask(**lyra_mask_kwargs),
+            "full_cross_attention": create_causal_mask(**lyra_mask_kwargs), 
+            #"sliding_cross_attention": create_sliding_window_causal_mask(**lyra_mask_kwargs),
         }
     #else:
         # --- DEBUG PRINTS START ---
@@ -157,16 +161,18 @@ def forward(
         "full_attention": self.rotary_emb(hidden_states, position_ids_mapping["full_attention"]),
         "sliding_attention": self.rotary_emb_local(hidden_states, position_ids_mapping["sliding_attention"]),
         "full_cross_attention": self.rotary_emb(hidden_states, position_ids_mapping["full_cross_attention"]),
-        "sliding_cross_attention": self.rotary_emb_local(hidden_states, position_ids_mapping["sliding_cross_attention"]),
+        #"sliding_cross_attention": self.rotary_emb_local(hidden_states, position_ids_mapping["sliding_cross_attention"]),
     }
 
     # decoder layers
     all_hidden_states = () if output_hidden_states else None
     all_self_attns = () if output_attentions else None
 
-    for decoder_layer in self.layers[: self.config.num_hidden_layers]:
+    for i, decoder_layer in enumerate(self.layers[: self.config.num_hidden_layers]):
         if output_hidden_states:
             all_hidden_states += (hidden_states,)
+        
+        kwargs['layer_idx'] = i
 
         layer_outputs = decoder_layer(
             hidden_states,
